@@ -30,7 +30,7 @@ Keys:
 /// The keys, for `deck --help` and the C-? popup.
 const KEYS: &[(&str, &str)] = &[
     ("Enter", "send (while Claude works, it waits its turn)"),
-    ("\\ Enter, C-J", "a new line in the prompt"),
+    ("S-Enter, C-J", "a new line in the prompt; so does \\ before Enter"),
     ("Esc", "stop the turn Claude is on"),
     ("Up, Down", "the row above or below, else earlier prompts"),
     ("C-A, C-E", "to the start or end of the prompt"),
@@ -38,6 +38,7 @@ const KEYS: &[(&str, &str)] = &[
     ("C-Backspace", "delete a word"),
     ("C-G", "edit the prompt in $EDITOR"),
     ("PgUp, PgDn", "scroll the answers"),
+    ("C-F", "find in the answers; C-F, Enter finds the next"),
     ("C-PgUp, C-PgDn", "scroll the tool log"),
     ("C-O", "the last turn's tool calls in full, and back"),
     ("C-Y", "copy the last answer, as drawn"),
@@ -114,6 +115,11 @@ struct App {
     flash: Option<String>,
     /// The session's background in fleet, for the answer pane.
     colour: Option<String>,
+    /// The last text C-F looked for.
+    found: String,
+    /// True while another window is in front, so the end of a turn shows
+    /// a box (herald, through notify-send).
+    away: bool,
     rows: u16,
     bar: Pane,
     answer: Pane,
@@ -155,6 +161,7 @@ fn main() {
 
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |p| {
+        Crust::disable_focus_reports();
         Crust::disable_modifier_keys();
         Crust::cleanup();
         default_hook(p);
@@ -163,6 +170,7 @@ fn main() {
     Crust::set_app_identity(&title(&s));
     Crust::enable_bracketed_paste();
     Crust::enable_ctrl_shift_keys();
+    Crust::enable_focus_reports();
 
     let mut app = App::new(s, last, claude, tx, errors);
     app.layout();
@@ -181,6 +189,8 @@ fn main() {
                 if Crust::terminal_size() != (app.bar.w, app.rows) {
                     app.layout();
                 }
+            } else if k == "FOCUS_IN" || k == "FOCUS_OUT" {
+                app.away = k == "FOCUS_OUT";
             } else if app.key(k) {
                 break;
             }
@@ -192,6 +202,7 @@ fn main() {
         app.place_cursor();
     }
     app.claude.stop();
+    Crust::disable_focus_reports();
     Crust::disable_modifier_keys();
     Crust::disable_bracketed_paste();
     Crust::cleanup();
@@ -251,6 +262,8 @@ impl App {
             flash: None,
             width: cache()["width"].as_u64().map_or(7, |w| w.clamp(5, 9) as u16),
             colour,
+            found: String::new(),
+            away: false,
             rows: 0,
             bar: Pane::new(1, 1, 1, 1, 255, 234),
             answer: Pane::new(1, 1, 1, 1, 252, 0),
@@ -317,9 +330,14 @@ impl App {
                 Event::Context(n) => self.context = n,
                 Event::Limits { hours, week, week_reset } => self.limits = Some((hours, week, week_reset)),
                 Event::Ask { id, tool, input } => {
-                    if tool == "AskUserQuestion" || tool == "ExitPlanMode" {
+                    if tool == "ExitPlanMode" {
                         self.claude.answer(&id, &input, false, "deck cannot show this dialog. Ask in plain text instead.");
                     } else {
+                        let what = match tool.as_str() {
+                            "AskUserQuestion" => input["questions"][0]["question"].as_str().unwrap_or("").to_string(),
+                            _ => format!("Allow {tool}: {}?", claude::what(&tool, &input)),
+                        };
+                        self.notify(&what);
                         self.asks.push_back((id, tool, input));
                     }
                 }
@@ -334,6 +352,8 @@ impl App {
                             self.log.pop();
                         }
                     }
+                    let first = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+                    self.notify(if failed && first.is_empty() { "stopped" } else { first });
                     if let Some(t) = self.turns.last_mut() {
                         t.answer = Some(text);
                         t.failed = failed;
@@ -374,6 +394,107 @@ impl App {
         }
         if answer || log {
             self.draw_line();
+        }
+        if self.asks.front().is_some_and(|a| a.1 == "AskUserQuestion") {
+            self.ask_questions();
+        }
+    }
+
+    /// A box at the top right (herald), only while another window is in
+    /// front. One notify-send per end of turn or question, never more.
+    fn notify(&self, what: &str) {
+        if !self.away {
+            return;
+        }
+        let what: String = what.chars().take(120).collect();
+        let title = title(&self.s);
+        std::thread::spawn(move || {
+            let _ = Command::new("notify-send").args(["-a", "deck", &title, &what]).status();
+        });
+    }
+
+    /// Claude's multiple-choice questions, one menu each. Esc on a menu
+    /// answers none of them, and Claude is told so.
+    fn ask_questions(&mut self) {
+        let Some((id, _, mut input)) = self.asks.front().cloned() else { return };
+        self.draw_line();
+        let mut answers = serde_json::Map::new();
+        for q in input["questions"].as_array().cloned().unwrap_or_default() {
+            match self.ask_one(&q) {
+                Some(a) => {
+                    answers.insert(q["question"].as_str().unwrap_or("").to_string(), json!(a));
+                }
+                None => {
+                    self.claude.answer(&id, &input, false, "The user closed the question without an answer.");
+                    self.asks.pop_front();
+                    return self.layout();
+                }
+            }
+        }
+        input["answers"] = Value::Object(answers);
+        self.claude.answer(&id, &input, true, "");
+        self.asks.pop_front();
+        self.layout();
+    }
+
+    /// One question as a menu: its options, then "Type an answer". With
+    /// several allowed, Enter ticks an option and "Done" sends the ticked.
+    fn ask_one(&mut self, q: &Value) -> Option<String> {
+        let multi = q["multiSelect"].as_bool() == Some(true);
+        let options: Vec<(String, String)> = q["options"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|o| (o["label"].as_str().unwrap_or("").to_string(), o["description"].as_str().unwrap_or("").to_string()))
+            .collect();
+        let (cols, rows) = Crust::terminal_size();
+        let w = (cols as usize).saturating_sub(8).min(90);
+        let head = word_wrap(q["question"].as_str().unwrap_or(""), w.saturating_sub(2));
+        let first = head.len() + 1;
+        let mut ticked = vec![false; options.len()];
+        let mut at = first;
+        loop {
+            let mut items: Vec<String> = head.iter().map(|l| format!(" {}", style::bold(l))).collect();
+            items.push(String::new());
+            for (i, (label, about)) in options.iter().enumerate() {
+                let tick = match (multi, ticked[i]) {
+                    (false, _) => "",
+                    (true, true) => "[x] ",
+                    (true, false) => "[ ] ",
+                };
+                items.push(format!(" {tick}{}  {}", style::fg(label, GREEN), style::dim(about)));
+            }
+            items.push(style::dim(" Type an answer"));
+            if multi {
+                items.push(" Done".into());
+            }
+            let h = (items.len() as u16).min(rows.saturating_sub(4));
+            let mut pop = Popup::centered(w as u16 + 2, h, 231, 236);
+            pop.pane.index = at;
+            at = pop.modal(&items.join("\n"))?;
+            let n = at.checked_sub(first);
+            match n {
+                Some(i) if i < options.len() && !multi => return Some(options[i].0.clone()),
+                Some(i) if i < options.len() => ticked[i] = !ticked[i],
+                Some(i) if i == options.len() => {
+                    self.line.set_text("");
+                    self.line.refresh();
+                    let typed = self.line.ask_or_cancel("Your answer: ", "");
+                    self.line.prompt.clear();
+                    match typed.map(|t| t.trim().to_string()) {
+                        Some(t) if !t.is_empty() => return Some(t),
+                        _ => self.draw_line(),
+                    }
+                }
+                Some(_) => {
+                    let chosen: Vec<&str> = options.iter().zip(&ticked).filter(|(_, &t)| t).map(|(o, _)| o.0.as_str()).collect();
+                    if !chosen.is_empty() {
+                        return Some(chosen.join(", "));
+                    }
+                }
+                // The question's own rows: back to the first option.
+                None => at = first,
+            }
         }
     }
 
@@ -482,10 +603,11 @@ impl App {
             "C-S-Y" => self.copy_view(),
             "C-B" => self.pick_colour(),
             "C-?" => self.show_help(),
-            "C-J" => {
+            "C-J" | "S-ENTER" => {
                 self.input.insert(self.at, '\n');
                 self.at += 1;
             }
+            "C-F" => self.find(),
             "UP" | "DOWN" => self.up_down(k == "UP"),
             "LEFT" => self.at = self.at.saturating_sub(1),
             "RIGHT" => self.at = (self.at + 1).min(self.input.len()),
@@ -566,6 +688,34 @@ impl App {
         self.copy(&text, "the view");
     }
 
+    /// Look for text in the answers: the next row that has it comes to the
+    /// top of the pane. C-F then Enter looks again from there.
+    fn find(&mut self) {
+        self.line.set_text("");
+        self.line.refresh();
+        let asked = self.line.ask_or_cancel("Find: ", &self.found);
+        self.line.prompt.clear();
+        let Some(what) = asked.map(|w| w.trim().to_string()).filter(|w| !w.is_empty()) else {
+            return;
+        };
+        let again = what == self.found;
+        self.found = what.clone();
+        let want = what.to_lowercase();
+        let hits: Vec<usize> = self.answer.visual_lines().iter().enumerate()
+            .filter(|(_, l)| crust::strip_ansi(l).to_lowercase().contains(&want))
+            .map(|(i, _)| i)
+            .collect();
+        let from = self.answer.ix + usize::from(again);
+        let Some(&row) = hits.iter().find(|&&i| i >= from).or(hits.first()) else {
+            self.flash = Some(format!("no \"{what}\" in the answers"));
+            return;
+        };
+        self.answer.ix = row;
+        self.answer.refresh();
+        let n = hits.iter().position(|&i| i == row).unwrap_or(0) + 1;
+        self.flash = Some(format!("\"{what}\" {n} of {}", hits.len()));
+    }
+
     /// Text to the clipboard. OSC 52 hands it to the terminal, so no
     /// program is started; glass takes about 12 KB of text that way.
     fn copy(&mut self, text: &str, what: &str) {
@@ -639,6 +789,7 @@ impl App {
     /// The terminal to a program, such as the editor or prism, until it
     /// quits.
     fn hand_over(&self, cmd: &mut Command) {
+        Crust::disable_focus_reports();
         Crust::disable_modifier_keys();
         Crust::disable_bracketed_paste();
         Crust::cleanup();
@@ -647,6 +798,7 @@ impl App {
         Crust::set_app_identity(&title(&self.s));
         Crust::enable_bracketed_paste();
         Crust::enable_ctrl_shift_keys();
+        Crust::enable_focus_reports();
     }
 
     /// Up and Down move between the prompt's rows, and past the first or
@@ -826,7 +978,9 @@ impl App {
             self.reshape(n);
         }
         let w = self.line.w as usize;
-        let text = if let Some((_, tool, input)) = self.asks.front() {
+        let text = if self.asks.front().is_some_and(|a| a.1 == "AskUserQuestion") {
+            style::fg("Claude asks", AMBER) + "  Enter picks · Esc answers nothing"
+        } else if let Some((_, tool, input)) = self.asks.front() {
             style::fg(&format!("Allow {tool}: {}?", claude::what(tool, input)), AMBER) + "  y yes · n no"
         } else {
             let rows = input_rows(&self.input, w);
@@ -978,6 +1132,25 @@ fn at_column((s, e): (usize, usize), input: &[char], col: usize) -> usize {
         i += 1;
     }
     i
+}
+
+/// Text in lines of at most `w` columns, broken between words.
+fn word_wrap(text: &str, w: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    for para in text.lines() {
+        let mut line = String::new();
+        for word in para.split_whitespace() {
+            if !line.is_empty() && crust::display_width(&line) + 1 + crust::display_width(word) > w.max(1) {
+                lines.push(std::mem::take(&mut line));
+            }
+            if !line.is_empty() {
+                line.push(' ');
+            }
+            line.push_str(word);
+        }
+        lines.push(line);
+    }
+    lines
 }
 
 /// An answer as drawn at `width`. It is drawn once per width, since the
@@ -1138,6 +1311,12 @@ mod tests {
         assert_eq!(inline("a `b` c"), format!("a {} c", style::fg("b", CODE)));
         assert_eq!(inline("**x** and `y`"), format!("{} and {}", style::bold("x"), style::fg("y", CODE)));
         assert_eq!(inline("one ` alone"), "one ` alone");
+    }
+
+    #[test]
+    fn a_question_wraps_between_words() {
+        assert_eq!(word_wrap("Should deck ring the bell?", 12), vec!["Should deck", "ring the", "bell?"]);
+        assert_eq!(word_wrap("one\ntwo", 12), vec!["one", "two"]);
     }
 
     #[test]

@@ -27,8 +27,12 @@ user@host ~/src/myproject [Opus 5.5 high] [12%] ...
   `~/.fleetrc` (`session <tag> <workspace> <colour>`). C-B picks a new
   one in `prism` and keeps it there.
 - The prompt grows to as many rows as it needs, up to a third of the
-  screen. `\` then Enter, or C-J, starts a new line.
+  screen. Shift+Enter, C-J, or `\` then Enter starts a new line.
 - Enter on a closed session in fleet opens it in deck.
+- When Claude asks a multiple-choice question, it opens as a menu. Esc
+  closes it, and Claude is told the question went unanswered.
+- When a turn ends, or Claude asks something, while another window is in
+  front, a box shows at the top right (`notify-send`, which herald draws).
 
 ## Use
 
@@ -41,10 +45,11 @@ deck <id>         open the session with this id
 | Key | Does |
 |---|---|
 | Enter | send; while Claude works, the message waits its turn |
-| \\ Enter, C-J | a new line in the prompt |
+| S-Enter, C-J, \\ Enter | a new line in the prompt |
 | Up, Down | the row above or below, else earlier prompts |
 | Esc | stop the turn Claude is on |
 | PgUp, PgDn | scroll the answers |
+| C-F | find in the answers; C-F then Enter finds the next |
 | C-PgUp, C-PgDn | scroll the tool log |
 | C-O | the last turn's tool calls in full, and back |
 | C-G | edit the prompt in `$EDITOR` (scribe if unset) |

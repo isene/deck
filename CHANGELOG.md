@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.6 (2026-10-26)
+
+- Claude's multiple-choice questions open as a menu, one per question.
+  "Type an answer" takes free text; with several choices allowed, Enter
+  ticks and "Done" sends. Esc answers none of them.
+- When a turn ends, or Claude asks something, while another window is in
+  front, a box shows (notify-send, drawn by herald). One call per turn,
+  nothing while idle.
+- C-F finds text in the answers and brings its row to the top; C-F then
+  Enter finds the next.
+- Shift+Enter starts a new line, as in Claude Code (needs crust 0.1.68).
+
 ## 0.1.5 (2026-10-26)
 
 - C-Y copies the last answer as drawn, HyperList and all. C-S-Y copies
