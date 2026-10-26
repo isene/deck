@@ -504,7 +504,8 @@ impl App {
         });
         self.line = Pane::new(1, rows.saturating_sub(1).max(1), cols, 1, 231, 0);
         one(&mut self.line);
-        self.foot = Pane::new(1, rows, cols, 1, 252, 0);
+        // Dark grey sets the status line apart from the answer pane above it.
+        self.foot = Pane::new(1, rows, cols, 1, 252, 236);
         one(&mut self.foot);
         for t in &mut self.turns {
             t.drawn = None;

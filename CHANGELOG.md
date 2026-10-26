@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1 (2026-10-26)
+
+- The status line has a dark grey background, apart from the answer pane.
+
 ## 0.1.0 (2026-10-26)
 
 - First version: the answer pane, the tool log, the info bar and the status
