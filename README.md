@@ -42,6 +42,8 @@ deck <id>         open the session with this id
 | C-PgUp, C-PgDn | scroll the tool log |
 | C-O | the last turn's tool calls in full, and back |
 | C-G | edit the prompt in `$EDITOR` (scribe if unset) |
+| C-Y | copy what the answer pane shows |
+| C-W, C-S-W | answer pane a tenth wider, narrower |
 | y, n | answer a permission question |
 | C-L | draw the screen again |
 | C-D | quit |

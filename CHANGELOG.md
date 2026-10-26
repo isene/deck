@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.4 (2026-10-26)
+
+- deck draws the HyperList itself, at the answer pane's width, so a long
+  Item wraps with its "+" mark. Claude Code's style hook leaves the text
+  plain when deck sets HL_RAW.
+- C-Y copies what the answer pane shows (OSC 52).
+- C-W and C-S-W make the answer pane a tenth wider or narrower, from half
+  to nine tenths; the width is kept in ~/.cache/deck.json. Word delete
+  stays on C-Backspace.
+
 ## 0.1.3 (2026-10-26)
 
 - C-G opens the prompt in `$EDITOR` (scribe if unset), as in Claude Code.

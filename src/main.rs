@@ -91,6 +91,10 @@ struct App {
     history: Vec<String>,
     back: usize,
     detail: bool,
+    /// The answer pane's share of the screen, in tenths (5 to 9).
+    width: u16,
+    /// A short note in the top bar until the next key, such as "copied".
+    flash: Option<String>,
     /// The session's background in fleet, for the answer pane.
     colour: Option<String>,
     rows: u16,
@@ -117,7 +121,9 @@ fn main() {
     let last = if s.resume { session::last(&s.id) } else { session::Last::default() };
     let errors = format!("{}/deck-{}.err", std::env::var("XDG_RUNTIME_DIR").unwrap_or("/tmp".into()), std::process::id());
     let file = fs::File::create(&errors).unwrap_or_else(|e| quit(&format!("{errors}: {e}")));
-    let mut env = vec![("CC_SESSION_ID", s.id.clone())];
+    // HL_RAW: the style hook leaves the HyperList drawing to deck, which
+    // knows the pane's width.
+    let mut env = vec![("CC_SESSION_ID", s.id.clone()), ("HL_RAW", "1".to_string())];
     if !s.tags.is_empty() {
         env.push(("CC_RESUME_TAGS", s.tags.join(" ")));
     }
@@ -127,12 +133,14 @@ fn main() {
 
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |p| {
+        Crust::disable_modifier_keys();
         Crust::cleanup();
         default_hook(p);
     }));
     Crust::init();
     Crust::set_app_identity("Deck");
     Crust::enable_bracketed_paste();
+    Crust::enable_ctrl_shift_keys();
 
     let mut app = App::new(s, last, claude, tx, errors);
     app.layout();
@@ -162,6 +170,7 @@ fn main() {
         app.place_cursor();
     }
     app.claude.stop();
+    Crust::disable_modifier_keys();
     Crust::disable_bracketed_paste();
     Crust::cleanup();
     let _ = fs::remove_file(&app.errors);
@@ -198,6 +207,8 @@ impl App {
             history: Vec::new(),
             back: 0,
             detail: false,
+            flash: None,
+            width: cache()["width"].as_u64().map_or(7, |w| w.clamp(5, 9) as u16),
             colour,
             rows: 0,
             bar: Pane::new(1, 1, 1, 1, 255, 234),
@@ -208,8 +219,7 @@ impl App {
         };
         if !last.prompt.is_empty() {
             app.log.push(Line::Prompt(last.prompt.clone()));
-            let answer = hyperlist(&last.answer).unwrap_or(last.answer);
-            app.turns.push(Turn { prompt: last.prompt, answer: Some(answer), failed: false, log_at: 0, drawn: None });
+            app.turns.push(Turn { prompt: last.prompt, answer: Some(last.answer), failed: false, log_at: 0, drawn: None });
         }
         app
     }
@@ -392,6 +402,7 @@ impl App {
 
     /// True when the user quits.
     fn key(&mut self, k: &str) -> bool {
+        self.flash = None;
         if let Some((id, _, input)) = self.asks.front().cloned() {
             match k {
                 "y" | "Y" | "n" | "N" | "ESC" => {
@@ -422,6 +433,7 @@ impl App {
             }
             "C-L" => self.layout(),
             "C-G" => self.edit_input(),
+            "C-Y" => self.copy_view(),
             "UP" if self.back > 0 => {
                 self.back -= 1;
                 let h = self.history[self.back].clone();
@@ -448,7 +460,9 @@ impl App {
                 self.at = 0;
             }
             "C-K" => self.input.truncate(self.at),
-            "C-W" | "WBACK" => {
+            "C-W" => self.widen(1),
+            "C-S-W" => self.widen(-1),
+            "WBACK" => {
                 let mut i = self.at;
                 while i > 0 && self.input[i - 1] == ' ' {
                     i -= 1;
@@ -475,6 +489,29 @@ impl App {
         false
     }
 
+    /// The answer pane a tenth of the screen wider (or narrower), from half
+    /// to nine tenths and round again, as w and W do in kastrup.
+    fn widen(&mut self, step: i16) {
+        self.width = (self.width as i16 - 5 + step).rem_euclid(5) as u16 + 5;
+        let mut v = cache();
+        v["width"] = json!(self.width);
+        save_cache(&v);
+        self.layout();
+    }
+
+    /// What the answer pane shows, as plain text, to the clipboard. OSC 52
+    /// hands it to the terminal, so no program is started.
+    fn copy_view(&mut self) {
+        let rows: Vec<String> = self.answer.visual_lines().iter()
+            .skip(self.answer.ix)
+            .take(self.answer.h as usize)
+            .map(|l| crust::strip_ansi(l).trim_end().to_string())
+            .collect();
+        let text = rows.join("\n").trim_matches('\n').to_string();
+        crust::clipboard_copy(&text, "clipboard");
+        self.flash = Some(format!("copied {} lines", text.lines().count()));
+    }
+
     /// The prompt in $EDITOR (scribe if unset), as C-G does in Claude Code.
     /// The editor has the terminal until it quits; what it saved comes back.
     fn edit_input(&mut self) {
@@ -483,12 +520,14 @@ impl App {
             return;
         }
         let editor = std::env::var("EDITOR").unwrap_or_else(|_| "scribe".into());
+        Crust::disable_modifier_keys();
         Crust::disable_bracketed_paste();
         Crust::cleanup();
         let _ = Command::new("sh").args(["-c", &format!("{editor} \"$1\""), "sh", &path]).status();
         Crust::init();
         Crust::set_app_identity("Deck");
         Crust::enable_bracketed_paste();
+        Crust::enable_ctrl_shift_keys();
         if let Ok(text) = fs::read_to_string(&path) {
             self.set_input(text.trim_end());
         }
@@ -525,7 +564,7 @@ impl App {
         let (cols, rows) = Crust::terminal_size();
         self.rows = rows;
         let h = rows.saturating_sub(3).max(1);
-        let sw = if cols >= 80 { (cols / 3).max(28) } else { 0 };
+        let sw = if cols >= 80 { cols * (10 - self.width) / 10 } else { 0 };
         let one = |p: &mut Pane| {
             p.wrap = false;
             p.scroll = false;
@@ -577,8 +616,11 @@ impl App {
         } else {
             style::fg("○ ready", GREEN)
         };
-        let left = format!(" {}  {}  {}", style::bold("deck"), style::fg(&self.name(), BLUE), state);
-        let right = style::dim("PgUp/PgDn scroll · ^O tools · ^D quit ");
+        let mut left = format!(" {}  {}  {}", style::bold("deck"), style::fg(&self.name(), BLUE), state);
+        if let Some(f) = &self.flash {
+            left += &style::dim(&format!(" · {f}"));
+        }
+        let right = style::dim("PgUp/PgDn scroll · ^O tools · ^Y copy · ^D quit ");
         let room = (self.bar.w as usize).saturating_sub(crust::display_width(&left) + crust::display_width(&right));
         let text = if room > 0 { format!("{left}{}{right}", " ".repeat(room)) } else { left };
         self.bar.set_text(&text);
@@ -747,21 +789,28 @@ fn cache_file() -> String {
     format!("{dir}/deck.json")
 }
 
-/// Claude Code reports a model's context window only at the end of a turn,
-/// so the last one seen stands in until then.
-fn known_window(model: &str) -> u64 {
-    let v: Value = fs::read_to_string(cache_file()).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
-    v["windows"][model].as_u64().unwrap_or(0)
+fn cache() -> Value {
+    fs::read_to_string(cache_file()).ok().and_then(|s| serde_json::from_str(&s).ok()).filter(Value::is_object).unwrap_or(json!({}))
 }
 
-fn remember_window(model: &str, window: u64) {
+fn save_cache(v: &Value) {
     let path = cache_file();
-    let mut v: Value = fs::read_to_string(&path).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(json!({}));
-    v["windows"][model] = json!(window);
     if let Some(dir) = std::path::Path::new(&path).parent() {
         let _ = fs::create_dir_all(dir);
     }
     let _ = fs::write(&path, v.to_string());
+}
+
+/// Claude Code reports a model's context window only at the end of a turn,
+/// so the last one seen stands in until then.
+fn known_window(model: &str) -> u64 {
+    cache()["windows"][model].as_u64().unwrap_or(0)
+}
+
+fn remember_window(model: &str, window: u64) {
+    let mut v = cache();
+    v["windows"][model] = json!(window);
+    save_cache(&v);
 }
 
 /// "claude-opus-5-5" as "Opus 5.5".
@@ -777,10 +826,11 @@ fn model_name(id: &str) -> String {
     name
 }
 
-/// An answer as the terminal shows it: tables drawn with lines, then light
-/// markdown. Claude Code has run its display hooks on it already.
+/// An answer as the terminal shows it: tables drawn with lines, then the
+/// HyperList drawing when the user has it on, then light markdown.
 fn render(md: &str, width: usize) -> String {
     let md = crust::text::format_markdown_tables(md, width);
+    let md = hyperlist(&md, width).unwrap_or(md);
     let mut out = Vec::new();
     let mut code = false;
     for line in md.lines() {
@@ -818,16 +868,16 @@ fn inline(line: &str) -> String {
 }
 
 /// Text through the HyperList display hook, when it is installed and on
-/// (`/hl`). Claude Code runs it on the answers it sends, but the transcript
-/// keeps the text as written, so a resumed answer needs it here. Twice
-/// over, it garbles the colour codes of the first pass.
-fn hyperlist(md: &str) -> Option<String> {
+/// (`/hl`). It wraps at `width` and marks the Items of a wrapped group with
+/// "+". Claude Code leaves it to deck (HL_RAW), as twice over it garbles the
+/// colour codes of the first pass.
+fn hyperlist(md: &str, width: usize) -> Option<String> {
     let home = std::env::var("HOME").ok()?;
     let hook = format!("{home}/.claude/hooks/hyperlist-display-asm");
     if !std::path::Path::new(&hook).exists() || std::path::Path::new(&format!("{home}/.claude/hyperlist-display.off")).exists() {
         return None;
     }
-    let mut child = Command::new(hook).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
+    let mut child = Command::new(hook).env("HL_WIDTH", width.to_string()).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
     let payload = json!({"delta": md, "index": 0, "final": true}).to_string();
     child.stdin.take()?.write_all(payload.as_bytes()).ok()?;
     let out = child.wait_with_output().ok()?;
