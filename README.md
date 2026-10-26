@@ -1,0 +1,72 @@
+# deck
+
+![Rust](https://img.shields.io/badge/language-Rust-orange) ![Unlicense](https://img.shields.io/badge/license-Unlicense-green) [![Fe2O3](https://img.shields.io/badge/suite-Fe%E2%82%82O%E2%82%83-b7410e)](https://github.com/isene/fe2o3)
+
+A paned terminal front for Claude Code. Part of the
+[Fe2O3](https://github.com/isene/fe2o3) Rust terminal suite.
+
+```
+ deck  #myproject  ● working 0:12 · 3 tools   Esc stops     PgUp/PgDn scroll · ^O tools · ^D quit
+› Why does the build fail on ARM?                  › Why does the build fail on ARM?
+                                                   ✓ Bash Build for ARM
+The linker flag is set for x86 only.               ✓ Read ~/src/build.rs
+...                                                ↻ rewrite: answer:1: 31 words (max 22)
+› _
+user@host ~/src/myproject [Opus 5.5 high] [12%] ...
+```
+
+- The answer gets the big pane. The newest answer starts at the top, and
+  PgUp/PgDn scroll back through older ones.
+- Each tool call is one line in the log on the right: ✓ when it worked,
+  ✗ when it failed. C-O shows the last turn's calls with their output.
+- When a stop hook sends an answer back, you see only the rewrite, and one
+  log line says what the hook found.
+- The bottom row runs the `statusLine` command from Claude Code's
+  settings, after each turn.
+
+## Use
+
+```
+deck              start a new session in this directory
+deck <tag>        open the session with this bookmark tag (from cc-sessions)
+deck <id>         open the session with this id
+```
+
+| Key | Does |
+|---|---|
+| Enter | send; while Claude works, the message waits its turn |
+| Esc | stop the turn Claude is on |
+| PgUp, PgDn | scroll the answers |
+| C-PgUp, C-PgDn | scroll the tool log |
+| C-O | the last turn's tool calls in full, and back |
+| y, n | answer a permission question |
+| C-L | draw the screen again |
+| C-D | quit |
+
+deck refuses a session that is open in Claude Code already. For what deck
+lacks (slash command dialogs, plan mode, questions with choices), quit and
+run `claude --resume <id>` on the same session.
+
+## How it works
+
+deck runs `claude -p --input-format stream-json --output-format
+stream-json --permission-prompts host` and reads its events. The answer
+pane shows each turn's `result`, which is the final text after any stop
+hook rewrite. When `~/.claude/hooks/hyperlist-display-asm` is installed
+and switched on, answers are drawn through it, as Claude Code does.
+
+Idle, deck uses no CPU: it waits on the keyboard, and the thread that reads
+Claude's output wakes it with a signal. While Claude works, the bar's clock
+wakes it once a second.
+
+## Build
+
+```
+git clone https://github.com/isene/crust
+git clone https://github.com/isene/deck
+cd deck && cargo build --release
+```
+
+## License
+
+[Unlicense](https://unlicense.org): public domain.
