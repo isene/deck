@@ -96,6 +96,20 @@ pub fn find(arg: Option<&str>) -> Result<Session, String> {
     Ok(Session { tags: tags_of(&b, &id), id, cwd, resume: true })
 }
 
+/// The background fleet gives the session, from its `session <tag> <ws>
+/// <bg>` lines in ~/.fleetrc.
+pub fn colour(tags: &[String]) -> Option<String> {
+    let rc = fs::read_to_string(home().join(".fleetrc")).ok()?;
+    colour_in(&rc, tags)
+}
+
+fn colour_in(rc: &str, tags: &[String]) -> Option<String> {
+    rc.lines().find_map(|l| match l.split_whitespace().collect::<Vec<_>>()[..] {
+        ["session", tag, _, bg, ..] if tags.iter().any(|t| t == tag) => Some(bg.to_string()),
+        _ => None,
+    })
+}
+
 /// The pid of a Claude Code process already running `id`. Sessions
 /// started with `c <tag>` carry CC_SESSION_ID in their environment.
 pub fn open_elsewhere(id: &str) -> Option<u32> {
@@ -199,6 +213,14 @@ pub fn last_in<'a>(lines: impl Iterator<Item = &'a str>) -> Last {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_colour_comes_from_the_sessions_tag() {
+        let rc = "# fleet\nsession asm 2 00101a\nsession pf 5 280028\nsession sOS -\n";
+        assert_eq!(colour_in(rc, &["pf".into()]).as_deref(), Some("280028"));
+        assert_eq!(colour_in(rc, &["sOS".into()]), None);
+        assert_eq!(colour_in(rc, &[]), None);
+    }
 
     #[test]
     fn a_new_id_is_a_version_4_uuid() {

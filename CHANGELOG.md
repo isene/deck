@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.2 (2026-10-26)
+
+- Answers are drawn once: Claude Code has run its display hook on them
+  already, and a second HyperList pass garbled the colour codes.
+- The answer pane takes the session's background from fleet's ~/.fleetrc.
+- The context window of each model is remembered in ~/.cache/deck.json, so
+  the status line shows the context share before the first turn.
+- A status line ready before the key reader started no longer waits for a
+  key.
+
 ## 0.1.1 (2026-10-26)
 
 - The status line has a dark grey background, apart from the answer pane.

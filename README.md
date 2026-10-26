@@ -23,6 +23,8 @@ user@host ~/src/myproject [Opus 5.5 high] [12%] ...
   log line says what the hook found.
 - The bottom row runs the `statusLine` command from Claude Code's
   settings, after each turn.
+- The answer pane takes the session's background from fleet's
+  `~/.fleetrc` (`session <tag> <workspace> <colour>`).
 
 ## Use
 

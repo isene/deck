@@ -91,6 +91,8 @@ struct App {
     history: Vec<String>,
     back: usize,
     detail: bool,
+    /// The session's background in fleet, for the answer pane.
+    colour: Option<String>,
     rows: u16,
     bar: Pane,
     answer: Pane,
@@ -134,6 +136,11 @@ fn main() {
 
     let mut app = App::new(s, last, claude, tx, errors);
     app.layout();
+    // The key reader catches the wake-up signal only once it has started.
+    // Start it, then take what came before, so nothing waits for a key.
+    Input::peek_pending();
+    WAKE.store(false, Ordering::SeqCst);
+    app.drain(&rx);
     app.run_status();
     loop {
         // While Claude works the bar shows the time, so wake once a second;
@@ -167,6 +174,8 @@ fn quit(why: &str) -> ! {
 
 impl App {
     fn new(s: session::Session, last: session::Last, claude: Claude, tx: Sender<Event>, errors: String) -> App {
+        let colour = session::colour(&s.tags);
+        let window = known_window(&last.model);
         let mut app = App {
             s,
             claude,
@@ -174,7 +183,7 @@ impl App {
             model: last.model,
             version: String::new(),
             context: last.context,
-            window: 0,
+            window,
             limits: None,
             turns: Vec::new(),
             log: Vec::new(),
@@ -189,6 +198,7 @@ impl App {
             history: Vec::new(),
             back: 0,
             detail: false,
+            colour,
             rows: 0,
             bar: Pane::new(1, 1, 1, 1, 255, 234),
             answer: Pane::new(1, 1, 1, 1, 252, 0),
@@ -198,7 +208,8 @@ impl App {
         };
         if !last.prompt.is_empty() {
             app.log.push(Line::Prompt(last.prompt.clone()));
-            app.turns.push(Turn { prompt: last.prompt, answer: Some(last.answer), failed: false, log_at: 0, drawn: None });
+            let answer = hyperlist(&last.answer).unwrap_or(last.answer);
+            app.turns.push(Turn { prompt: last.prompt, answer: Some(answer), failed: false, log_at: 0, drawn: None });
         }
         app
     }
@@ -219,6 +230,9 @@ impl App {
             match e {
                 Event::Init { session, model, version } => {
                     self.s.id = session;
+                    if self.window == 0 {
+                        self.window = known_window(&model);
+                    }
                     self.model = model;
                     self.version = version;
                     status = true;
@@ -261,8 +275,9 @@ impl App {
                     }
                 }
                 Event::Answer { text, failed, window } => {
-                    if window > 0 {
+                    if window > 0 && window != self.window {
                         self.window = window;
+                        remember_window(&self.model, window);
                     }
                     // The final text came as a note too; the answer pane has it.
                     if let Some(Line::Note(n)) = self.log.last() {
@@ -497,6 +512,9 @@ impl App {
         one(&mut self.bar);
         // One blank column keeps the answer's scroll mark off the log.
         self.answer = Pane::new(1, 2, cols - sw - u16::from(sw > 0), h, 252, 0);
+        if let Some(hex) = &self.colour {
+            self.answer.set_bg_hex(hex);
+        }
         self.side = (sw > 0).then(|| {
             let mut p = Pane::new(cols - sw + 1, 2, sw, h, 246, 233);
             p.wrap = false;
@@ -700,6 +718,30 @@ fn log_line(l: &Line) -> String {
     }
 }
 
+/// Where deck remembers each model's context window between runs.
+fn cache_file() -> String {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let dir = std::env::var("XDG_CACHE_HOME").unwrap_or(format!("{home}/.cache"));
+    format!("{dir}/deck.json")
+}
+
+/// Claude Code reports a model's context window only at the end of a turn,
+/// so the last one seen stands in until then.
+fn known_window(model: &str) -> u64 {
+    let v: Value = fs::read_to_string(cache_file()).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+    v["windows"][model].as_u64().unwrap_or(0)
+}
+
+fn remember_window(model: &str, window: u64) {
+    let path = cache_file();
+    let mut v: Value = fs::read_to_string(&path).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(json!({}));
+    v["windows"][model] = json!(window);
+    if let Some(dir) = std::path::Path::new(&path).parent() {
+        let _ = fs::create_dir_all(dir);
+    }
+    let _ = fs::write(&path, v.to_string());
+}
+
 /// "claude-opus-5-5" as "Opus 5.5".
 fn model_name(id: &str) -> String {
     let rest = id.strip_prefix("claude-").unwrap_or(id);
@@ -713,11 +755,10 @@ fn model_name(id: &str) -> String {
     name
 }
 
-/// An answer as the terminal shows it: tables drawn with lines, then the
-/// HyperList drawing when the user has it on, then light markdown.
+/// An answer as the terminal shows it: tables drawn with lines, then light
+/// markdown. Claude Code has run its display hooks on it already.
 fn render(md: &str, width: usize) -> String {
     let md = crust::text::format_markdown_tables(md, width);
-    let md = hyperlist(&md).unwrap_or(md);
     let mut out = Vec::new();
     let mut code = false;
     for line in md.lines() {
@@ -754,8 +795,10 @@ fn inline(line: &str) -> String {
     out
 }
 
-/// The answer through the HyperList display hook, when it is installed and
-/// on (`/hl`). Claude Code runs it for the screen; deck does the same.
+/// Text through the HyperList display hook, when it is installed and on
+/// (`/hl`). Claude Code runs it on the answers it sends, but the transcript
+/// keeps the text as written, so a resumed answer needs it here. Twice
+/// over, it garbles the colour codes of the first pass.
 fn hyperlist(md: &str) -> Option<String> {
     let home = std::env::var("HOME").ok()?;
     let hook = format!("{home}/.claude/hooks/hyperlist-display-asm");
