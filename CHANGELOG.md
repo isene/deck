@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.7 (2026-10-26)
+
+- With the HyperList drawing on, a table in an answer becomes HyperList
+  Items, as in Claude Code. deck drew its lines first, and the hook then
+  wrapped those lines as Items, so a table came out torn.
+
 ## 0.1.6 (2026-10-26)
 
 - Claude's multiple-choice questions open as a menu, one per question.

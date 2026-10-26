@@ -1236,11 +1236,16 @@ fn model_name(id: &str) -> String {
     name
 }
 
-/// An answer as the terminal shows it: tables drawn with lines, then the
-/// HyperList drawing when the user has it on, then light markdown.
+/// An answer as the terminal shows it: the HyperList drawing when the user
+/// has it on, else tables drawn with lines; then light markdown.
 fn render(md: &str, width: usize) -> String {
-    let md = crust::text::format_markdown_tables(md, width);
-    let md = hyperlist(&md, width).unwrap_or(md);
+    draw(md, width, hyperlist)
+}
+
+/// The HyperList hook turns a table into Items itself, so it gets the
+/// markdown as written. Lines drawn first came back wrapped as Items.
+fn draw(md: &str, width: usize, hl: fn(&str, usize) -> Option<String>) -> String {
+    let md = hl(md, width).unwrap_or_else(|| crust::text::format_markdown_tables(md, width));
     let mut out = Vec::new();
     let mut code = false;
     for line in md.lines() {
@@ -1298,6 +1303,14 @@ fn hyperlist(md: &str, width: usize) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_hyperlist_hook_gets_the_table_as_written() {
+        let md = "Two.\n\n| # | Question |\n|---|---|\n| 1 | Yes? |";
+        let seen = |m: &str, _: usize| Some(if m.contains("|---|") { "raw" } else { "drawn" }.to_string());
+        assert_eq!(draw(md, 80, seen), "raw");
+        assert!(draw(md, 80, |_, _| None).contains('│'));
+    }
 
     #[test]
     fn model_names() {
