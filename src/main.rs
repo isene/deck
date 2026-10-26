@@ -421,6 +421,7 @@ impl App {
                 self.fill_answer(true);
             }
             "C-L" => self.layout(),
+            "C-G" => self.edit_input(),
             "UP" if self.back > 0 => {
                 self.back -= 1;
                 let h = self.history[self.back].clone();
@@ -472,6 +473,27 @@ impl App {
         }
         self.draw_line();
         false
+    }
+
+    /// The prompt in $EDITOR (scribe if unset), as C-G does in Claude Code.
+    /// The editor has the terminal until it quits; what it saved comes back.
+    fn edit_input(&mut self) {
+        let path = self.errors.replace(".err", ".md");
+        if fs::write(&path, self.input.iter().collect::<String>()).is_err() {
+            return;
+        }
+        let editor = std::env::var("EDITOR").unwrap_or_else(|_| "scribe".into());
+        Crust::disable_bracketed_paste();
+        Crust::cleanup();
+        let _ = Command::new("sh").args(["-c", &format!("{editor} \"$1\""), "sh", &path]).status();
+        Crust::init();
+        Crust::set_app_identity("Deck");
+        Crust::enable_bracketed_paste();
+        if let Ok(text) = fs::read_to_string(&path) {
+            self.set_input(text.trim_end());
+        }
+        let _ = fs::remove_file(&path);
+        self.layout();
     }
 
     fn set_input(&mut self, s: &str) {

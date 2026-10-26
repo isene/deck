@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.3 (2026-10-26)
+
+- C-G opens the prompt in `$EDITOR` (scribe if unset), as in Claude Code.
+
 ## 0.1.2 (2026-10-26)
 
 - Answers are drawn once: Claude Code has run its display hook on them
