@@ -110,6 +110,36 @@ fn colour_in(rc: &str, tags: &[String]) -> Option<String> {
     })
 }
 
+/// Keep `hex` as the session's background in ~/.fleetrc, where fleet's b
+/// puts it too. False when the session has no tag to keep it under.
+pub fn set_colour(tags: &[String], hex: &str) -> bool {
+    if tags.is_empty() {
+        return false;
+    }
+    let path = home().join(".fleetrc");
+    let rc = fs::read_to_string(&path).unwrap_or_default();
+    let tmp = path.with_extension("deck");
+    fs::write(&tmp, with_colour(&rc, tags, hex)).is_ok() && fs::rename(&tmp, &path).is_ok()
+}
+
+/// The rc with the colour on the first `session` line of the session's
+/// tags, the line `colour_in` reads, or on a new one.
+fn with_colour(rc: &str, tags: &[String], hex: &str) -> String {
+    let mut lines: Vec<String> = rc.lines().map(str::to_string).collect();
+    let mine = |l: &String| match l.split_whitespace().collect::<Vec<_>>()[..] {
+        ["session", tag, ..] => tags.iter().any(|t| t == tag),
+        _ => false,
+    };
+    match lines.iter().position(mine) {
+        Some(i) => {
+            let f: Vec<&str> = lines[i].split_whitespace().collect();
+            lines[i] = format!("session {} {} {hex}", f[1], f.get(2).unwrap_or(&"-"));
+        }
+        None => lines.push(format!("session {} - {hex}", tags[0])),
+    }
+    lines.join("\n") + "\n"
+}
+
 /// The pid of a Claude Code process already running `id`. Sessions
 /// started with `c <tag>` carry CC_SESSION_ID in their environment.
 pub fn open_elsewhere(id: &str) -> Option<u32> {
@@ -220,6 +250,17 @@ mod tests {
         assert_eq!(colour_in(rc, &["pf".into()]).as_deref(), Some("280028"));
         assert_eq!(colour_in(rc, &["sOS".into()]), None);
         assert_eq!(colour_in(rc, &[]), None);
+    }
+
+    #[test]
+    fn a_picked_colour_goes_on_the_line_that_is_read() {
+        let rc = "session asm 2 00101a\nsession pf 5 280028\nsession sOS -\n";
+        let set = |tags: &[&str], hex| with_colour(rc, &tags.iter().map(|t| t.to_string()).collect::<Vec<_>>(), hex);
+        assert_eq!(set(&["pf"], "112233"), "session asm 2 00101a\nsession pf 5 112233\nsession sOS -\n");
+        assert_eq!(set(&["sOS"], "112233"), "session asm 2 00101a\nsession pf 5 280028\nsession sOS - 112233\n");
+        assert_eq!(set(&["new"], "112233"), format!("{rc}session new - 112233\n"));
+        let after = set(&["x", "pf"], "445566");
+        assert_eq!(colour_in(&after, &["x".into(), "pf".into()]).as_deref(), Some("445566"));
     }
 
     #[test]

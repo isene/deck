@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.5 (2026-10-26)
+
+- C-Y copies the last answer as drawn, HyperList and all. C-S-Y copies
+  what the answer pane shows, as C-Y did before.
+- C-B picks the answer pane's colour in prism and keeps it in
+  ~/.fleetrc, where fleet's b keeps it. A one-column pane between the
+  answer and the log takes the same colour.
+- The prompt grows to as many rows as it needs, up to a third of the
+  screen, and then scrolls. Up and Down move between its rows. `\` then
+  Enter, or C-J, starts a new line, as in Claude Code.
+- C-? shows the keys in a popup. The bottom row shows deck's version at
+  the right, and says so when the binary was rebuilt.
+- The window is titled "Deck #tag".
+- A resize no longer draws every answer again; C-L still does.
+
 ## 0.1.4 (2026-10-26)
 
 - deck draws the HyperList itself, at the answer pane's width, so a long

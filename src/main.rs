@@ -7,7 +7,7 @@ mod claude;
 mod session;
 
 use claude::{Claude, Event, WAKE};
-use crust::{seq, style, Crust, Cursor, Input, Pane};
+use crust::{seq, style, Crust, Cursor, Input, Pane, Popup};
 use serde_json::{json, Value};
 use std::collections::VecDeque;
 use std::fs;
@@ -17,7 +17,7 @@ use std::sync::atomic::Ordering;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Instant;
 
-const HELP: &str = "deck: a paned front for Claude Code
+const USAGE: &str = "deck: a paned front for Claude Code
 
 Usage:
   deck              start a new session in this directory
@@ -25,14 +25,31 @@ Usage:
   deck <id>         open the session with this id
 
 Keys:
-  Enter             send (while Claude works, it waits its turn)
-  Esc               stop the turn Claude is on
-  PgUp, PgDn        scroll the answers
-  C-PgUp, C-PgDn    scroll the tool log
-  C-O               the last turn's tool calls in full, and back
-  C-L               draw the screen again
-  C-D               quit
 ";
+
+/// The keys, for `deck --help` and the C-? popup.
+const KEYS: &[(&str, &str)] = &[
+    ("Enter", "send (while Claude works, it waits its turn)"),
+    ("\\ Enter, C-J", "a new line in the prompt"),
+    ("Esc", "stop the turn Claude is on"),
+    ("Up, Down", "the row above or below, else earlier prompts"),
+    ("C-A, C-E", "to the start or end of the prompt"),
+    ("C-U, C-K", "delete to the start or end of the prompt"),
+    ("C-Backspace", "delete a word"),
+    ("C-G", "edit the prompt in $EDITOR"),
+    ("PgUp, PgDn", "scroll the answers"),
+    ("C-PgUp, C-PgDn", "scroll the tool log"),
+    ("C-O", "the last turn's tool calls in full, and back"),
+    ("C-Y", "copy the last answer, as drawn"),
+    ("C-S-Y", "copy what the answer pane shows"),
+    ("C-W, C-S-W", "answer pane a tenth wider, narrower"),
+    ("C-B", "pick the answer pane's colour (prism)"),
+    ("C-L", "draw the screen again"),
+    ("C-?", "this help"),
+    ("C-D", "quit"),
+];
+
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const BLUE: u8 = 39;
 const CODE: u8 = 179;
@@ -101,6 +118,8 @@ struct App {
     bar: Pane,
     answer: Pane,
     side: Option<Pane>,
+    /// The column between the answer and the log, in the answer's colour.
+    gap: Option<Pane>,
     line: Pane,
     foot: Pane,
 }
@@ -108,8 +127,11 @@ struct App {
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
-        Some("-h" | "--help") => return print!("{HELP}"),
-        Some("-v" | "--version") => return println!("deck {}", env!("CARGO_PKG_VERSION")),
+        Some("-h" | "--help") => {
+            print!("{USAGE}");
+            return KEYS.iter().for_each(|(k, what)| println!("  {k:<16}  {what}"));
+        }
+        Some("-v" | "--version") => return println!("deck {VERSION}"),
         _ => {}
     }
     let s = session::find(args.first().map(String::as_str)).unwrap_or_else(|e| quit(&e));
@@ -138,7 +160,7 @@ fn main() {
         default_hook(p);
     }));
     Crust::init();
-    Crust::set_app_identity("Deck");
+    Crust::set_app_identity(&title(&s));
     Crust::enable_bracketed_paste();
     Crust::enable_ctrl_shift_keys();
 
@@ -181,6 +203,25 @@ fn quit(why: &str) -> ! {
     std::process::exit(1)
 }
 
+/// The session's tag, or the start of its id.
+fn name(s: &session::Session) -> String {
+    match s.tags.first() {
+        Some(t) => format!("#{t}"),
+        None => s.id[..8].to_string(),
+    }
+}
+
+/// The window's title: "Deck #pf".
+fn title(s: &session::Session) -> String {
+    format!("Deck {}", name(s))
+}
+
+/// True once the binary this deck runs from was rebuilt, so the bottom
+/// row can say so. One readlink per draw of that row.
+fn rebuilt() -> bool {
+    fs::read_link("/proc/self/exe").is_ok_and(|p| p.to_string_lossy().ends_with(" (deleted)"))
+}
+
 impl App {
     fn new(s: session::Session, last: session::Last, claude: Claude, tx: Sender<Event>, errors: String) -> App {
         let colour = session::colour(&s.tags);
@@ -214,6 +255,7 @@ impl App {
             bar: Pane::new(1, 1, 1, 1, 255, 234),
             answer: Pane::new(1, 1, 1, 1, 252, 0),
             side: None,
+            gap: None,
             line: Pane::new(1, 1, 1, 1, 231, 0),
             foot: Pane::new(1, 1, 1, 1, 252, 0),
         };
@@ -225,10 +267,7 @@ impl App {
     }
 
     fn name(&self) -> String {
-        match self.s.tags.first() {
-            Some(t) => format!("#{t}"),
-            None => self.s.id[..8].to_string(),
-        }
+        name(&self.s)
     }
 
     // ------------------------------------------------------------------
@@ -431,19 +470,23 @@ impl App {
                 self.detail = !self.detail;
                 self.fill_answer(true);
             }
-            "C-L" => self.layout(),
+            "C-L" => {
+                // Drawn again from the start, so a /hl switch shows too.
+                for t in &mut self.turns {
+                    t.drawn = None;
+                }
+                self.layout();
+            }
             "C-G" => self.edit_input(),
-            "C-Y" => self.copy_view(),
-            "UP" if self.back > 0 => {
-                self.back -= 1;
-                let h = self.history[self.back].clone();
-                self.set_input(&h);
+            "C-Y" => self.copy_answer(),
+            "C-S-Y" => self.copy_view(),
+            "C-B" => self.pick_colour(),
+            "C-?" => self.show_help(),
+            "C-J" => {
+                self.input.insert(self.at, '\n');
+                self.at += 1;
             }
-            "DOWN" if self.back < self.history.len() => {
-                self.back += 1;
-                let h = self.history.get(self.back).cloned().unwrap_or_default();
-                self.set_input(&h);
-            }
+            "UP" | "DOWN" => self.up_down(k == "UP"),
             "LEFT" => self.at = self.at.saturating_sub(1),
             "RIGHT" => self.at = (self.at + 1).min(self.input.len()),
             "HOME" | "C-A" => self.at = 0,
@@ -499,8 +542,20 @@ impl App {
         self.layout();
     }
 
-    /// What the answer pane shows, as plain text, to the clipboard. OSC 52
-    /// hands it to the terminal, so no program is started.
+    /// The last answer as drawn, HyperList and all, as plain text.
+    fn copy_answer(&mut self) {
+        let width = (self.answer.w as usize).saturating_sub(2);
+        let last = self.turns.iter_mut().rev().find(|t| t.answer.as_deref().is_some_and(|a| !a.trim().is_empty()));
+        let Some(t) = last else {
+            self.flash = Some("no answer to copy".into());
+            return;
+        };
+        let text = crust::strip_ansi(&drawn(t, width));
+        let text = text.lines().map(str::trim_end).collect::<Vec<_>>().join("\n");
+        self.copy(&text, "the answer");
+    }
+
+    /// What the answer pane shows, scrolled or not, as plain text.
     fn copy_view(&mut self) {
         let rows: Vec<String> = self.answer.visual_lines().iter()
             .skip(self.answer.ix)
@@ -508,8 +563,61 @@ impl App {
             .map(|l| crust::strip_ansi(l).trim_end().to_string())
             .collect();
         let text = rows.join("\n").trim_matches('\n').to_string();
-        crust::clipboard_copy(&text, "clipboard");
-        self.flash = Some(format!("copied {} lines", text.lines().count()));
+        self.copy(&text, "the view");
+    }
+
+    /// Text to the clipboard. OSC 52 hands it to the terminal, so no
+    /// program is started; glass takes about 12 KB of text that way.
+    fn copy(&mut self, text: &str, what: &str) {
+        if text.len().div_ceil(3) * 4 > 16_000 {
+            self.flash = Some(format!("{what} is too long for the clipboard"));
+            return;
+        }
+        crust::clipboard_copy(text, "clipboard");
+        self.flash = Some(format!("copied {what}, {} lines", text.lines().count()));
+    }
+
+    /// The answer pane's colour, picked in prism and kept in ~/.fleetrc,
+    /// where fleet's b keeps it too.
+    fn pick_colour(&mut self) {
+        let out = self.errors.replace(".err", ".prism");
+        let mut cmd = Command::new("prism");
+        cmd.args(["--pick", "--hex", &format!("--out={out}")]);
+        if let Some(c) = &self.colour {
+            cmd.arg(format!("#{c}"));
+        }
+        self.hand_over(&mut cmd);
+        // prism writes "fg=#RRGGBB"; --pick fills the fg slot.
+        let hex = fs::read_to_string(&out)
+            .ok()
+            .and_then(|s| s.lines().find_map(|l| l.strip_prefix("fg=")).map(|h| h.trim().trim_start_matches('#').to_lowercase()))
+            .filter(|h| h.len() == 6 && h.chars().all(|c| c.is_ascii_hexdigit()));
+        let _ = fs::remove_file(&out);
+        self.flash = Some(match &hex {
+            Some(h) if session::set_colour(&self.s.tags, h) => format!("colour #{h}"),
+            Some(h) => format!("colour #{h} until deck quits: the session has no tag"),
+            None => "no colour picked".into(),
+        });
+        if hex.is_some() {
+            self.colour = hex;
+        }
+        self.layout();
+    }
+
+    /// The keys in a popup, as in the other Fe2O3 programs. Esc, q or Enter
+    /// closes it.
+    fn show_help(&mut self) {
+        let mut t = format!(" {}\n", style::bold(&format!("deck v{VERSION}")));
+        for (k, what) in KEYS {
+            t += &format!("{}{what}\n", style::fg(&format!("  {k:<16}"), GREEN));
+        }
+        let t = t.trim_end();
+        let (cols, rows) = Crust::terminal_size();
+        let w = t.lines().map(crust::display_width).max().unwrap_or(0) as u16 + 4;
+        let h = t.lines().count() as u16;
+        let mut pop = Popup::centered(w.min(cols.saturating_sub(4)), h.min(rows.saturating_sub(4)), 231, 236);
+        pop.view(t);
+        self.layout();
     }
 
     /// The prompt in $EDITOR (scribe if unset), as C-G does in Claude Code.
@@ -520,19 +628,44 @@ impl App {
             return;
         }
         let editor = std::env::var("EDITOR").unwrap_or_else(|_| "scribe".into());
-        Crust::disable_modifier_keys();
-        Crust::disable_bracketed_paste();
-        Crust::cleanup();
-        let _ = Command::new("sh").args(["-c", &format!("{editor} \"$1\""), "sh", &path]).status();
-        Crust::init();
-        Crust::set_app_identity("Deck");
-        Crust::enable_bracketed_paste();
-        Crust::enable_ctrl_shift_keys();
+        self.hand_over(Command::new("sh").args(["-c", &format!("{editor} \"$1\""), "sh", &path]));
         if let Ok(text) = fs::read_to_string(&path) {
             self.set_input(text.trim_end());
         }
         let _ = fs::remove_file(&path);
         self.layout();
+    }
+
+    /// The terminal to a program, such as the editor or prism, until it
+    /// quits.
+    fn hand_over(&self, cmd: &mut Command) {
+        Crust::disable_modifier_keys();
+        Crust::disable_bracketed_paste();
+        Crust::cleanup();
+        let _ = cmd.status();
+        Crust::init();
+        Crust::set_app_identity(&title(&self.s));
+        Crust::enable_bracketed_paste();
+        Crust::enable_ctrl_shift_keys();
+    }
+
+    /// Up and Down move between the prompt's rows, and past the first or
+    /// last row to the prompts sent before, as in Claude Code.
+    fn up_down(&mut self, up: bool) {
+        let rows = input_rows(&self.input, self.line.w as usize);
+        let (r, col) = cursor_at(&rows, &self.input, self.at);
+        let to = if up { r.checked_sub(1) } else { Some(r + 1).filter(|&n| n < rows.len()) };
+        if let Some(n) = to {
+            self.at = at_column(rows[n], &self.input, col);
+        } else if up && self.back > 0 {
+            self.back -= 1;
+            let h = self.history[self.back].clone();
+            self.set_input(&h);
+        } else if !up && self.back < self.history.len() {
+            self.back += 1;
+            let h = self.history.get(self.back).cloned().unwrap_or_default();
+            self.set_input(&h);
+        }
     }
 
     fn set_input(&mut self, s: &str) {
@@ -541,6 +674,11 @@ impl App {
     }
 
     fn enter(&mut self) {
+        // A backslash before Enter asks for a new line, as in Claude Code.
+        if self.at > 0 && self.input[self.at - 1] == '\\' {
+            self.input[self.at - 1] = '\n';
+            return;
+        }
         let text: String = self.input.iter().collect::<String>().trim().to_string();
         if text.is_empty() || self.ended.is_some() {
             return;
@@ -563,7 +701,8 @@ impl App {
     fn layout(&mut self) {
         let (cols, rows) = Crust::terminal_size();
         self.rows = rows;
-        let h = rows.saturating_sub(3).max(1);
+        let n = self.input_height(cols);
+        let h = rows.saturating_sub(2 + n).max(1);
         let sw = if cols >= 80 { cols * (10 - self.width) / 10 } else { 0 };
         let one = |p: &mut Pane| {
             p.wrap = false;
@@ -576,21 +715,27 @@ impl App {
         if let Some(hex) = &self.colour {
             self.answer.set_bg_hex(hex);
         }
+        self.gap = (sw > 0).then(|| {
+            let mut p = Pane::new(cols - sw, 2, 1, h, 252, 0);
+            one(&mut p);
+            if let Some(hex) = &self.colour {
+                p.set_bg_hex(hex);
+            }
+            p
+        });
         self.side = (sw > 0).then(|| {
             let mut p = Pane::new(cols - sw + 1, 2, sw, h, 246, 233);
             p.wrap = false;
             p
         });
-        self.line = Pane::new(1, rows.saturating_sub(1).max(1), cols, 1, 231, 0);
+        self.line = Pane::new(1, rows.saturating_sub(n).max(1), cols, n, 231, 0);
         one(&mut self.line);
         // Dark grey sets the status line apart from the answer pane above it.
         self.foot = Pane::new(1, rows, cols, 1, 252, 236);
         one(&mut self.foot);
-        for t in &mut self.turns {
-            t.drawn = None;
-        }
         print!("{}", seq::HIDE);
         Crust::clear_screen();
+        self.gap.iter_mut().for_each(Pane::refresh);
         self.fill_answer(true);
         self.fill_side();
         self.draw_line();
@@ -620,39 +765,97 @@ impl App {
         if let Some(f) = &self.flash {
             left += &style::dim(&format!(" · {f}"));
         }
-        let right = style::dim("PgUp/PgDn scroll · ^O tools · ^Y copy · ^D quit ");
+        let right = style::dim("PgUp/PgDn scroll · ^O tools · ^Y copy · ^? help · ^D quit ");
         let room = (self.bar.w as usize).saturating_sub(crust::display_width(&left) + crust::display_width(&right));
         let text = if room > 0 { format!("{left}{}{right}", " ".repeat(room)) } else { left };
         self.bar.set_text(&text);
         self.bar.refresh();
     }
 
+    /// The status line, and deck's version at the right, as in the other
+    /// Fe2O3 programs.
     fn draw_foot(&mut self) {
-        let text = self.status.clone();
-        self.foot.set_text(&text);
+        let version = if rebuilt() { format!("deck v{VERSION} is old: restart ") } else { format!("deck v{VERSION} ") };
+        let room = (self.foot.w as usize).saturating_sub(version.len() + 1);
+        let status = crust::truncate_ansi(&self.status, room);
+        let pad = " ".repeat((self.foot.w as usize).saturating_sub(version.len() + crust::display_width(&status)));
+        self.foot.set_text(&format!("{status}{pad}{}", style::dim(&version)));
         self.foot.refresh();
         self.place_cursor();
     }
 
+    /// The rows the prompt takes: as many as it has, up to a third of the
+    /// screen, and then it scrolls.
+    fn input_height(&self, cols: u16) -> u16 {
+        if !self.asks.is_empty() {
+            return 1;
+        }
+        let most = (self.rows as usize / 3).clamp(1, 10);
+        input_rows(&self.input, cols as usize).len().min(most) as u16
+    }
+
+    /// The prompt grew or shrank by a row: the panes above give or take it.
+    /// They are drawn whole, since the prompt wrote over rows they had.
+    fn reshape(&mut self, n: u16) {
+        let h = self.rows.saturating_sub(2 + n).max(1);
+        let at_end = !self.answer.moredown;
+        self.answer.h = h;
+        self.answer.invalidate();
+        if at_end {
+            self.answer.bottom();
+        } else {
+            self.answer.refresh();
+        }
+        if let Some(side) = self.side.as_mut() {
+            side.h = h;
+            side.invalidate();
+            side.bottom();
+        }
+        if let Some(gap) = self.gap.as_mut() {
+            gap.h = h;
+            gap.full_refresh();
+        }
+        self.line = Pane::new(1, self.rows.saturating_sub(n).max(1), self.bar.w, n, 231, 0);
+        self.line.wrap = false;
+        self.line.scroll = false;
+    }
+
     fn draw_line(&mut self) {
+        let n = self.input_height(self.bar.w);
+        if n != self.line.h {
+            self.reshape(n);
+        }
         let w = self.line.w as usize;
         let text = if let Some((_, tool, input)) = self.asks.front() {
             style::fg(&format!("Allow {tool}: {}?", claude::what(tool, input)), AMBER) + "  y yes · n no"
         } else {
-            let (shown, _) = input_view(&self.input, self.at, w);
-            style::fg("› ", BLUE) + &shown
+            let rows = input_rows(&self.input, w);
+            let top = self.input_top(&rows);
+            let shown: Vec<String> = rows[top..].iter().take(self.line.h as usize).enumerate().map(|(i, &(s, e))| {
+                let lead = if top + i == 0 { style::fg("› ", BLUE) } else { "  ".into() };
+                lead + &self.input[s..e].iter().collect::<String>()
+            }).collect();
+            shown.join("\n")
         };
         self.line.set_text(&text);
         self.line.refresh();
         self.place_cursor();
     }
 
+    /// The first row of the prompt in view: the cursor's row stays shown.
+    fn input_top(&self, rows: &[(usize, usize)]) -> usize {
+        let (r, _) = cursor_at(rows, &self.input, self.at);
+        (r + 1).saturating_sub(self.line.h as usize)
+    }
+
     fn place_cursor(&self) {
         if !self.asks.is_empty() || self.ended.is_some() {
             print!("{}", seq::HIDE);
         } else {
-            let (_, col) = input_view(&self.input, self.at, self.line.w as usize);
-            Cursor::set(col as u16 + 1, self.line.y);
+            let rows = input_rows(&self.input, self.line.w as usize);
+            let (r, col) = cursor_at(&rows, &self.input, self.at);
+            let y = self.line.y + (r - self.input_top(&rows)) as u16;
+            Cursor::set(col as u16 + 1, y);
             print!("{}", seq::SHOW);
         }
         let _ = std::io::stdout().flush();
@@ -734,17 +937,56 @@ impl App {
     }
 }
 
-/// The input as one row: newlines shown as ⏎, scrolled sideways so the
-/// cursor stays in view. Also the cursor's column in that row.
-fn input_view(input: &[char], at: usize, w: usize) -> (String, usize) {
-    let shown: Vec<char> = input.iter().map(|&c| if c == '\n' { '⏎' } else { c }).collect();
-    let width = |cs: &[char]| cs.iter().map(|&c| crust::cell_width(c)).sum::<usize>();
-    let room = w.saturating_sub(3);
-    let mut start = 0;
-    while start < at && width(&shown[start..at]) > room {
-        start += 1;
+/// The prompt in rows of `w` columns, each a range of `input`: "› " or two
+/// spaces lead each row, and a newline starts a new one (it shows in none).
+/// One column stays free for the cursor at the end of a row.
+fn input_rows(input: &[char], w: usize) -> Vec<(usize, usize)> {
+    let room = w.saturating_sub(3).max(1);
+    let mut rows = Vec::new();
+    let (mut start, mut cols) = (0, 0);
+    for (i, &c) in input.iter().enumerate() {
+        if c == '\n' {
+            rows.push((start, i));
+            (start, cols) = (i + 1, 0);
+            continue;
+        }
+        let cw = crust::cell_width(c);
+        if cols + cw > room {
+            rows.push((start, i));
+            (start, cols) = (i, 0);
+        }
+        cols += cw;
     }
-    (shown[start..].iter().collect(), 2 + width(&shown[start..at]))
+    rows.push((start, input.len()));
+    rows
+}
+
+/// The cursor's row, and its column counted from the pane's left edge.
+fn cursor_at(rows: &[(usize, usize)], input: &[char], at: usize) -> (usize, usize) {
+    let r = rows.iter().rposition(|&(s, _)| s <= at).unwrap_or(0);
+    let s = rows[r].0;
+    (r, 2 + input[s..at].iter().map(|&c| crust::cell_width(c)).sum::<usize>())
+}
+
+/// The place in a row nearest a column. A row that wraps into the next one
+/// stops a character short, or the cursor would show on the next row.
+fn at_column((s, e): (usize, usize), input: &[char], col: usize) -> usize {
+    let last = if e < input.len() && input[e] != '\n' { e - 1 } else { e };
+    let (mut i, mut x) = (s, 2);
+    while i < last && x + crust::cell_width(input[i]) <= col {
+        x += crust::cell_width(input[i]);
+        i += 1;
+    }
+    i
+}
+
+/// An answer as drawn at `width`. It is drawn once per width, since the
+/// HyperList drawing starts a program.
+fn drawn(t: &mut Turn, width: usize) -> String {
+    if t.drawn.as_ref().map(|d| d.0) != Some(width) {
+        t.drawn = Some((width, render(t.answer.as_deref().unwrap_or(""), width)));
+    }
+    t.drawn.as_ref().map(|d| d.1.clone()).unwrap_or_default()
 }
 
 fn turn_text(t: &mut Turn, width: usize) -> String {
@@ -752,12 +994,7 @@ fn turn_text(t: &mut Turn, width: usize) -> String {
     let body = match &t.answer {
         None => style::dim("…"),
         Some(a) if a.trim().is_empty() && t.failed => style::fg("✗ stopped", RED),
-        Some(a) => {
-            if t.drawn.as_ref().map(|d| d.0) != Some(width) {
-                t.drawn = Some((width, render(a, width)));
-            }
-            t.drawn.as_ref().map(|d| d.1.clone()).unwrap_or_default()
-        }
+        Some(_) => drawn(t, width),
     };
     format!("{}\n\n{}", prompt.join("\n"), body)
 }
@@ -904,9 +1141,18 @@ mod tests {
     }
 
     #[test]
-    fn the_cursor_stays_in_view() {
-        let input: Vec<char> = "abcdefghij\n".chars().collect();
-        assert_eq!(input_view(&input, 11, 8), ("ghij⏎".to_string(), 7));
-        assert_eq!(input_view(&input, 0, 8), ("abcdefghij⏎".to_string(), 2));
+    fn a_long_prompt_takes_more_rows() {
+        let input: Vec<char> = "abcdefghij\nxy".chars().collect();
+        // Eight columns: "› " and five characters, one column for the cursor.
+        let rows = input_rows(&input, 8);
+        assert_eq!(rows, vec![(0, 5), (5, 10), (11, 13)]);
+        assert_eq!(cursor_at(&rows, &input, 13), (2, 4));
+        assert_eq!(cursor_at(&rows, &input, 10), (1, 7));
+        assert_eq!(cursor_at(&rows, &input, 5), (1, 2));
+        // Up from the end of "xy" lands under it; from the right edge of a
+        // wrapped row it stays on that row.
+        assert_eq!(at_column(rows[1], &input, 4), 7);
+        assert_eq!(at_column(rows[0], &input, 7), 4);
+        assert_eq!(input_rows(&[], 8), vec![(0, 0)]);
     }
 }

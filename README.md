@@ -22,9 +22,13 @@ user@host ~/src/myproject [Opus 5.5 high] [12%] ...
 - When a stop hook sends an answer back, you see only the rewrite, and one
   log line says what the hook found.
 - The bottom row runs the `statusLine` command from Claude Code's
-  settings, after each turn.
+  settings, after each turn, with deck's version at the right.
 - The answer pane takes the session's background from fleet's
-  `~/.fleetrc` (`session <tag> <workspace> <colour>`).
+  `~/.fleetrc` (`session <tag> <workspace> <colour>`). C-B picks a new
+  one in `prism` and keeps it there.
+- The prompt grows to as many rows as it needs, up to a third of the
+  screen. `\` then Enter, or C-J, starts a new line.
+- Enter on a closed session in fleet opens it in deck.
 
 ## Use
 
@@ -37,13 +41,18 @@ deck <id>         open the session with this id
 | Key | Does |
 |---|---|
 | Enter | send; while Claude works, the message waits its turn |
+| \\ Enter, C-J | a new line in the prompt |
+| Up, Down | the row above or below, else earlier prompts |
 | Esc | stop the turn Claude is on |
 | PgUp, PgDn | scroll the answers |
 | C-PgUp, C-PgDn | scroll the tool log |
 | C-O | the last turn's tool calls in full, and back |
 | C-G | edit the prompt in `$EDITOR` (scribe if unset) |
-| C-Y | copy what the answer pane shows |
+| C-Y | copy the last answer, as drawn |
+| C-S-Y | copy what the answer pane shows, scrolled or not |
 | C-W, C-S-W | answer pane a tenth wider, narrower |
+| C-B | pick the answer pane's colour in `prism` |
+| C-? | the keys in a popup |
 | y, n | answer a permission question |
 | C-L | draw the screen again |
 | C-D | quit |
