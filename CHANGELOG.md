@@ -10,6 +10,8 @@
 - Answer text is white. It was light grey, and a line with a coloured word
   turned white after that word.
 - The top bar has the same grey as the status line at the bottom.
+- A long prompt breaks between words, so a word moves whole to the next
+  row; only a word longer than a row is cut.
 
 ## 0.1.11 (2026-10-27)
 

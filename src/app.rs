@@ -1382,23 +1382,35 @@ impl App {
 
 /// The prompt in rows of `w` columns, each a range of `input`: "› " or two
 /// spaces lead each row, and a newline starts a new one (it shows in none).
-/// One column stays free for the cursor at the end of a row.
+/// A row breaks after its last space, so a word moves whole to the next
+/// row; only a word longer than a row is cut. One column stays free for
+/// the cursor at the end of a row, and a space may take it.
 fn input_rows(input: &[char], w: usize) -> Vec<(usize, usize)> {
     let room = w.saturating_sub(3).max(1);
     let mut rows = Vec::new();
-    let (mut start, mut cols) = (0, 0);
+    let (mut start, mut cols, mut gap) = (0, 0, None);
     for (i, &c) in input.iter().enumerate() {
         if c == '\n' {
             rows.push((start, i));
-            (start, cols) = (i + 1, 0);
+            (start, cols, gap) = (i + 1, 0, None);
             continue;
         }
         let cw = crust::cell_width(c);
         if cols + cw > room {
-            rows.push((start, i));
-            (start, cols) = (i, 0);
+            if c == ' ' {
+                rows.push((start, i + 1));
+                (start, cols, gap) = (i + 1, 0, None);
+                continue;
+            }
+            let cut = gap.unwrap_or(i);
+            rows.push((start, cut));
+            cols = input[cut..i].iter().map(|&c| crust::cell_width(c)).sum();
+            (start, gap) = (cut, None);
         }
         cols += cw;
+        if c == ' ' {
+            gap = Some(i + 1);
+        }
     }
     rows.push((start, input.len()));
     rows
@@ -1742,5 +1754,14 @@ mod tests {
         assert_eq!(at_column(rows[1], &input, 4), 7);
         assert_eq!(at_column(rows[0], &input, 7), 4);
         assert_eq!(input_rows(&[], 8), vec![(0, 0)]);
+    }
+
+    #[test]
+    fn the_prompt_breaks_between_words() {
+        let rows = |t: &str| input_rows(&t.chars().collect::<Vec<_>>(), 8);
+        assert_eq!(rows("aaa bbb ccc"), vec![(0, 4), (4, 8), (8, 11)]);
+        // A space at the edge ends its row instead of starting the next.
+        assert_eq!(rows("abcde fg"), vec![(0, 6), (6, 8)]);
+        assert_eq!(rows("abcdefghij"), vec![(0, 5), (5, 10)]);
     }
 }
