@@ -6,7 +6,7 @@ A paned terminal front for Claude Code. Part of the
 [Fe2O3](https://github.com/isene/fe2o3) Rust terminal suite.
 
 ```
- deck  #myproject  ● working 0:12 · 3 tools   Esc stops     PgUp/PgDn scroll · ^O tools · ^D quit
+ deck  #myproject  ● working 0:12 · 3 tools · Bash 0:04   Esc stops     PgUp/PgDn scroll · ^O tools · ^D quit
 › Why does the build fail on ARM?                  › Why does the build fail on ARM?
                                                    ✓ Bash Build for ARM
 The linker flag is set for x86 only.               ✓ Read ~/src/build.rs

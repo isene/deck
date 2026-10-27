@@ -116,6 +116,8 @@ pub struct App {
     pushed: VecDeque<String>,
     asks: VecDeque<(String, String, Value)>,
     busy: Option<Instant>,
+    /// When the step Claude is on began: a tool call, its end, or a note.
+    step: Instant,
     ended: Option<String>,
     errors: String,
     status: String,
@@ -337,6 +339,7 @@ impl App {
             pushed: VecDeque::new(),
             asks: VecDeque::new(),
             busy: None,
+            step: Instant::now(),
             ended: None,
             errors,
             status: String::new(),
@@ -390,11 +393,13 @@ impl App {
                     status = true;
                 }
                 Event::Tool { id, name, what, input } => {
+                    self.step = Instant::now();
                     self.log.push(Line::Tool(Tool { id, name, what, input, failed: None, output: String::new() }));
                     log = true;
                     answer |= self.detail;
                 }
                 Event::Done { id, failed, output } => {
+                    self.step = Instant::now();
                     if let Some(t) = self.log.iter_mut().rev().find_map(|l| match l {
                         Line::Tool(t) if t.id == id => Some(t),
                         _ => None,
@@ -406,6 +411,7 @@ impl App {
                     answer |= self.detail;
                 }
                 Event::Note(t) => {
+                    self.step = Instant::now();
                     self.log.push(Line::Note(t));
                     log = true;
                 }
@@ -634,6 +640,7 @@ impl App {
         self.turns.push(Turn { prompt: text.clone(), answer: None, failed: false, log_at: self.log.len(), drawn: None });
         self.log.push(Line::Prompt(text));
         self.busy = Some(Instant::now());
+        self.step = Instant::now();
         self.detail = false;
         self.fill_answer(true);
         self.fill_side();
@@ -1091,6 +1098,13 @@ impl App {
             let start = self.turns.last().map_or(0, |t| t.log_at);
             let tools = self.log[start..].iter().filter(|l| matches!(l, Line::Tool(_))).count();
             let mut st = format!("● working {}:{:02} · {} tool{}", s / 60, s % 60, tools, if tools == 1 { "" } else { "s" });
+            // The step it is on, so a long quiet spell shows what it waits for.
+            let running = self.log[start..].iter().rev().find_map(|l| match l {
+                Line::Tool(t) if t.failed.is_none() => Some(t.name.as_str()),
+                _ => None,
+            });
+            let p = self.step.elapsed().as_secs();
+            st += &format!(" · {} {}:{:02}", running.unwrap_or("thinking"), p / 60, p % 60);
             let waiting = self.waiting.len() + self.pushed.len();
             if waiting > 0 {
                 st += &format!(" · {waiting} waiting");

@@ -8,6 +8,10 @@
   deck asks Claude Code to echo each prompt it reads
   (`--replay-user-messages`), one short line per prompt.
 - A reopened session shows such a prompt under the one it joined.
+- The top line shows the step Claude is on and how long it has run, such
+  as `Bash 1:05` or `thinking 0:31`, so a long quiet spell shows what it
+  waits for. It costs nothing new: the line already redraws each second
+  during a turn.
 - Needs crust 0.1.69, which reads Ctrl+Enter as C-ENTER.
 
 ## 0.1.8 (2026-10-27)
