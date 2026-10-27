@@ -985,11 +985,14 @@ impl App {
     /// The status line, and deck's version at the right, as in the other
     /// Fe2O3 programs.
     fn draw_foot(&mut self) {
-        let version = if rebuilt() { format!("deck v{VERSION} is old: restart ") } else { format!("deck v{VERSION} ") };
+        let old = rebuilt();
+        let version = if old { format!("deck v{VERSION} is old: restart ") } else { format!("deck v{VERSION} ") };
         let room = (self.foot.w as usize).saturating_sub(version.len() + 1);
         let status = crust::truncate_ansi(&self.status, room);
         let pad = " ".repeat((self.foot.w as usize).saturating_sub(version.len() + crust::display_width(&status)));
-        self.foot.set_text(&format!("{status}{pad}{}", style::dim(&version)));
+        // Amber when old, as in kastrup and tock.
+        let version = if old { style::bold(&style::fg(&version, 208)) } else { style::dim(&version) };
+        self.foot.set_text(&format!("{status}{pad}{version}"));
         self.foot.refresh();
         self.place_cursor();
     }

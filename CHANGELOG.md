@@ -23,6 +23,8 @@
 - A prompt sent while Claude works shows at once under the running turn,
   in purple until deck hands it to Claude. Before, only the count in the
   top line showed it.
+- "deck v… is old: restart" shows in bold amber, as in kastrup and tock.
+  Before, it was dim grey like the version beside it.
 
 ## 0.1.7 (2026-10-26)
 
