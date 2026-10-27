@@ -29,7 +29,7 @@ Keys:
 
 /// The keys, for `deck --help` and the C-? popup.
 const KEYS: &[(&str, &str)] = &[
-    ("Enter", "send (while Claude works, it waits its turn)"),
+    ("Enter", "send (while Claude works, it waits its turn, in purple)"),
     ("S-Enter, C-J", "a new line in the prompt; so does \\ before Enter"),
     ("Esc", "stop the turn Claude is on"),
     ("Up, Down", "the row above or below, else earlier prompts"),
@@ -58,6 +58,7 @@ const CODE: u8 = 179;
 const GREEN: u8 = 78;
 const RED: u8 = 203;
 const AMBER: u8 = 214;
+const WAIT: u8 = 141;
 
 struct Tool {
     id: String,
@@ -853,6 +854,7 @@ impl App {
         self.remember(&text);
         if self.busy.is_some() {
             self.waiting.push_back(text);
+            self.fill_answer(true);
         } else {
             self.send(text);
         }
@@ -1083,7 +1085,10 @@ impl App {
                 })),
                 None => {}
             }
-            let latest = blocks.pop().unwrap_or_default();
+            let mut latest = blocks.pop().unwrap_or_default();
+            if !self.waiting.is_empty() {
+                latest += &format!("\n\n{}", waiting_text(&self.waiting));
+            }
             (blocks.join("\n"), latest)
         };
         if jump {
@@ -1219,6 +1224,12 @@ fn turn_text(t: &mut Turn, width: usize) -> String {
         Some(_) => drawn(t, width),
     };
     format!("{}\n\n{}", prompt.join("\n"), body)
+}
+
+/// Prompts sent while Claude works, in their own colour until they go.
+fn waiting_text(waiting: &VecDeque<String>) -> String {
+    let lines: Vec<String> = waiting.iter().flat_map(|p| p.lines()).map(|l| style::fg(&format!("› {l}"), WAIT)).collect();
+    lines.join("\n")
 }
 
 fn log_line(l: &Line) -> String {
@@ -1400,6 +1411,12 @@ fn hyperlist(md: &str, width: usize) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_waiting_prompt_is_drawn() {
+        let text = crust::strip_ansi(&waiting_text(&VecDeque::from(["one\ntwo".to_string(), "three".to_string()])));
+        assert_eq!(text, "› one\n› two\n› three");
+    }
 
     #[test]
     fn history_is_the_projects_own_prompts() {

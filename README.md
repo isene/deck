@@ -44,7 +44,7 @@ deck <id>         open the session with this id
 
 | Key | Does |
 |---|---|
-| Enter | send; while Claude works, the message waits its turn |
+| Enter | send; while Claude works, the message waits its turn, in purple |
 | S-Enter, C-J, \\ Enter | a new line in the prompt |
 | Up, Down | the row above or below, else earlier prompts, also from past runs |
 | !command | run it in a shell; Claude gets what it printed with the next prompt |

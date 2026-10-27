@@ -8,6 +8,9 @@
 - `!command` runs the command in a shell, in the session's folder, with
   the terminal handed over. Claude gets what it printed with the next
   prompt, as in Claude Code.
+- A prompt sent while Claude works shows at once under the running turn,
+  in purple until deck hands it to Claude. Before, only the count in the
+  top line showed it.
 
 ## 0.1.7 (2026-10-26)
 
