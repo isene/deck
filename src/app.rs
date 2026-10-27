@@ -104,6 +104,14 @@ pub struct App {
     /// Under gluon: another tab is in front, so the end of a turn shows a
     /// box as when another window is.
     hidden: bool,
+    /// Under gluon's Home tab: deck's rows, as (the row above the first,
+    /// how many). None is the whole screen.
+    area: Option<(u16, u16)>,
+    /// The terminal's size when the panes were laid out.
+    size: (u16, u16),
+    /// Under gluon: deck drew outside its area (a popup, the editor), so
+    /// the rest of the screen wants drawing again.
+    over: bool,
     model: String,
     version: String,
     context: u64,
@@ -122,6 +130,8 @@ pub struct App {
     old: bool,
     /// A thin line above the prompt.
     rule: Pane,
+    /// The black row between the prompt and the status line.
+    blank: Pane,
     ended: Option<String>,
     errors: String,
     status: String,
@@ -269,7 +279,7 @@ impl App {
     pub fn after_wait(&mut self, key: Option<String>) {
         if let Some(k) = key.as_deref() {
             if k == "RESIZE" {
-                if Crust::terminal_size() != (self.bar.w, self.rows) {
+                if Crust::terminal_size() != self.size {
                     self.layout();
                 }
             } else if k == "FOCUS_IN" || k == "FOCUS_OUT" {
@@ -309,6 +319,18 @@ impl App {
         self.hidden = hidden;
     }
 
+    /// Under gluon's Home tab: draw in `rows` rows below row `top`, or on
+    /// the whole screen with None.
+    pub fn set_area(&mut self, area: Option<(u16, u16)>) {
+        self.area = area;
+        self.layout();
+    }
+
+    /// True once after deck drew outside its area.
+    pub fn take_overdraw(&mut self) -> bool {
+        std::mem::take(&mut self.over)
+    }
+
     /// Under gluon: what the tab before had on screen. Claude gets it with
     /// the next prompt, and a line in the log says so.
     pub fn attach(&mut self, what: &str, text: &str) {
@@ -335,6 +357,9 @@ impl App {
             tab_line: None,
             seen: String::new(),
             hidden: false,
+            area: None,
+            size: (0, 0),
+            over: false,
             model: last.model,
             version: String::new(),
             context: last.context,
@@ -369,6 +394,7 @@ impl App {
             gap: None,
             line: Pane::new(1, 1, 1, 1, 231, 0),
             rule: Pane::new(1, 1, 1, 1, 240, 0),
+            blank: Pane::new(1, 1, 1, 1, 240, 0),
             foot: Pane::new(1, 1, 1, 1, 252, 0),
         };
         for (prompt, answer) in last.turns {
@@ -565,6 +591,7 @@ impl App {
     /// One question as a menu: its options, then "Type an answer". With
     /// several allowed, Enter ticks an option and "Done" sends the ticked.
     fn ask_one(&mut self, q: &Value) -> Option<String> {
+        self.over = true;
         let multi = q["multiSelect"].as_bool() == Some(true);
         let options: Vec<(String, String)> = q["options"]
             .as_array()
@@ -921,6 +948,7 @@ impl App {
         let h = t.lines().count() as u16;
         let mut pop = Popup::centered(w.min(cols.saturating_sub(4)), h.min(rows.saturating_sub(4)), 231, 236);
         pop.view(t);
+        self.over = true;
         self.layout();
     }
 
@@ -942,7 +970,8 @@ impl App {
 
     /// The terminal to a program, such as the editor or prism, until it
     /// quits.
-    fn hand_over(&self, cmd: &mut Command) -> Option<i32> {
+    fn hand_over(&mut self, cmd: &mut Command) -> Option<i32> {
+        self.over = true;
         Crust::disable_focus_reports();
         Crust::disable_modifier_keys();
         Crust::disable_bracketed_paste();
@@ -1058,24 +1087,26 @@ impl App {
     // Screen
 
     fn layout(&mut self) {
-        let (cols, rows) = Crust::terminal_size();
+        let (cols, all) = Crust::terminal_size();
+        self.size = (cols, all);
+        let (top, rows) = self.area.unwrap_or((0, all));
         self.rows = rows;
         let n = self.input_height(cols);
-        let h = rows.saturating_sub(3 + n).max(1);
+        let h = rows.saturating_sub(4 + n).max(1);
         let sw = if cols >= 80 { cols * (10 - self.width) / 10 } else { 0 };
         let one = |p: &mut Pane| {
             p.wrap = false;
             p.scroll = false;
         };
-        self.bar = Pane::new(1, 1, cols, 1, 255, 234);
+        self.bar = Pane::new(1, top + 1, cols, 1, 255, 234);
         one(&mut self.bar);
         // One blank column keeps the answer's scroll mark off the log.
-        self.answer = Pane::new(1, 2, cols - sw - u16::from(sw > 0), h, 252, 0);
+        self.answer = Pane::new(1, top + 2, cols - sw - u16::from(sw > 0), h, 252, 0);
         if let Some(hex) = &self.colour {
             self.answer.set_bg_hex(hex);
         }
         self.gap = (sw > 0).then(|| {
-            let mut p = Pane::new(cols - sw, 2, 1, h, 252, 0);
+            let mut p = Pane::new(cols - sw, top + 2, 1, h, 252, 0);
             one(&mut p);
             if let Some(hex) = &self.colour {
                 p.set_bg_hex(hex);
@@ -1083,18 +1114,21 @@ impl App {
             p
         });
         self.side = (sw > 0).then(|| {
-            let mut p = Pane::new(cols - sw + 1, 2, sw, h, 246, 233);
+            let mut p = Pane::new(cols - sw + 1, top + 2, sw, h, 246, 233);
             p.wrap = false;
             p
         });
         self.input_panes(n);
         // Dark grey sets the status line apart from the answer pane above it.
-        self.foot = Pane::new(1, rows, cols, 1, 252, 236);
+        self.foot = Pane::new(1, top + rows, cols, 1, 252, 236);
         one(&mut self.foot);
         print!("{}", seq::HIDE);
-        Crust::clear_screen();
+        if self.area.is_none() {
+            Crust::clear_screen();
+        }
         self.gap.iter_mut().for_each(Pane::refresh);
         self.rule.refresh();
+        self.blank.refresh();
         self.fill_answer(false);
         self.fill_side();
         self.draw_line();
@@ -1172,7 +1206,7 @@ impl App {
     /// The prompt grew or shrank by a row: the panes above give or take it.
     /// They are drawn whole, since the prompt wrote over rows they had.
     fn reshape(&mut self, n: u16) {
-        let h = self.rows.saturating_sub(3 + n).max(1);
+        let h = self.rows.saturating_sub(4 + n).max(1);
         let at_end = !self.answer.moredown;
         self.answer.h = h;
         self.answer.invalidate();
@@ -1192,21 +1226,21 @@ impl App {
         }
         self.input_panes(n);
         self.rule.refresh();
+        self.blank.refresh();
     }
 
-    /// The prompt's rows and a thin line above them, on the answer pane's
-    /// colour, so the prompt sits with the answers instead of in a strip.
+    /// The prompt's rows on black, a thin line above them, and a black
+    /// row between them and the status line.
     fn input_panes(&mut self, n: u16) {
         let cols = self.bar.w;
-        let y = self.rows.saturating_sub(n).max(2);
+        let top = self.area.map_or(0, |a| a.0);
+        let y = (top + self.rows).saturating_sub(n + 1).max(top + 2);
         self.rule = Pane::new(1, y - 1, cols, 1, 240, 0);
         self.line = Pane::new(1, y, cols, n, 231, 0);
+        self.blank = Pane::new(1, (top + self.rows).saturating_sub(1), cols, 1, 240, 0);
         for p in [&mut self.rule, &mut self.line] {
             p.wrap = false;
             p.scroll = false;
-            if let Some(hex) = &self.colour {
-                p.set_bg_hex(hex);
-            }
         }
         self.rule.set_text(&"─".repeat(cols as usize));
     }
@@ -1241,7 +1275,7 @@ impl App {
         (r + 1).saturating_sub(self.line.h as usize)
     }
 
-    fn place_cursor(&self) {
+    pub fn place_cursor(&self) {
         if !self.asks.is_empty() || self.ended.is_some() {
             print!("{}", seq::HIDE);
         } else {

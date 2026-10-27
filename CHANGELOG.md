@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.12 (2026-10-27)
+
+- The prompt is back on black under the thin grey line, with a black row
+  between it and the status line.
+- Under gluon's Home tab, deck draws in the bottom half of the screen
+  (`set_area`), and tells gluon when a popup or the editor drew over the
+  rest (`take_overdraw`).
+
 ## 0.1.11 (2026-10-27)
 
 - The prompt sits on the answer pane's colour under a thin line, instead
