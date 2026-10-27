@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <radialGradient id="back" cx="50%" cy="45%" r="60%">
+      <stop offset="0%" style="stop-color:#23202b"/>
+      <stop offset="100%" style="stop-color:#0a0910"/>
+    </radialGradient>
+  </defs>
+  <circle cx="128" cy="128" r="124" fill="url(#back)"/>
+
+  <!-- a terminal in three panes: the answers, the tool log, the status line -->
+  <rect x="50" y="62" width="156" height="132" rx="8" fill="#191311" stroke="#f74c00" stroke-width="5"/>
+  <line x1="150" y1="64" x2="150" y2="170" stroke="#f74c00" stroke-width="3" opacity="0.6"/>
+  <rect x="52" y="170" width="152" height="22" fill="#3a2418"/>
+
+  <g stroke-linecap="round" stroke-width="6" stroke="#d97757">
+    <line x1="64" y1="84" x2="132" y2="84"/>
+    <line x1="64" y1="102" x2="122" y2="102"/>
+    <line x1="64" y1="120" x2="136" y2="120"/>
+    <line x1="64" y1="138" x2="108" y2="138"/>
+  </g>
+  <g stroke-linecap="round" stroke-width="4" stroke="#ffb066" opacity="0.8">
+    <line x1="162" y1="84" x2="192" y2="84"/>
+    <line x1="162" y1="98" x2="184" y2="98"/>
+    <line x1="162" y1="112" x2="190" y2="112"/>
+    <line x1="162" y1="126" x2="178" y2="126"/>
+  </g>
+  <g stroke-linecap="round" stroke-width="4">
+    <line x1="64" y1="181" x2="92" y2="181" stroke="#9ccc65"/>
+    <line x1="104" y1="181" x2="140" y2="181" stroke="#ffb066"/>
+  </g>
+
+  <circle cx="128" cy="128" r="124" fill="none" stroke="#f74c00" stroke-width="3" stroke-opacity=".9"/>
+  <circle cx="128" cy="128" r="118" fill="none" stroke="#ffb066" stroke-width="1" stroke-opacity=".5"/>
+</svg>
