@@ -499,6 +499,15 @@ impl App {
                     status = true;
                 }
                 Event::Taken(_) => {}
+                // Another session's message joins the prompt of the turn it came in.
+                Event::Mail(text) => {
+                    if let Some(t) = self.turns.last_mut().filter(|t| t.answer.is_none()) {
+                        t.prompt = format!("{}\n{text}", t.prompt);
+                    }
+                    self.log.push(Line::Prompt(text));
+                    answer = true;
+                    log = true;
+                }
                 Event::Context(n) => self.context = n,
                 Event::Limits { hours, week, week_reset } => self.limits = Some((hours, week, week_reset)),
                 Event::Ask { id, tool, input } => {

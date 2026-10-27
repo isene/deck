@@ -204,10 +204,23 @@ pub fn last_in<'a>(lines: impl Iterator<Item = &'a str>) -> Last {
         let prompt = has(r#""type":"user""#) && !has(r#""type":"tool_result""#);
         let answer = has(r#""type":"assistant""#) && has(r#""type":"text""#);
         let queued = has(r#""type":"queued_command""#);
-        if !(prompt || answer || queued) {
+        let mail = has(crate::claude::MAIL);
+        if !(prompt || answer || queued || mail) {
             continue;
         }
         let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+        // Another session's message joins the turn it came in, as it did live.
+        let hook = match v["type"].as_str() {
+            Some("attachment") if v["attachment"]["type"] == "hook_additional_context" => v["attachment"]["content"][0].as_str(),
+            Some("user") if v["isMeta"] == true => v["message"]["content"].as_str(),
+            _ => None,
+        };
+        if let Some(m) = hook.filter(|_| mail).and_then(crate::claude::mail) {
+            if let Some(turn) = l.turns.last_mut() {
+                turn.0 = format!("{}\n{m}", turn.0);
+            }
+            continue;
+        }
         // A compaction writes its summary as a user line; it is no prompt.
         if ["isMeta", "isSidechain", "isCompactSummary"].iter().any(|k| v[k].as_bool() == Some(true)) {
             continue;
@@ -331,6 +344,7 @@ mod tests {
             r#"{"type":"user","message":{"content":[{"type":"tool_result","content":"ok"}]}}"#,
             r#"{"type":"attachment","attachment":{"type":"queued_command","prompt":"and this"}}"#,
             r#"{"type":"user","isMeta":true,"message":{"content":"meta"}}"#,
+            r#"{"type":"attachment","attachment":{"type":"hook_additional_context","content":["Messages delivered via the fleet bus (from ...):\n- hi\n-- web"]}}"#,
             r#"{"type":"user","message":{"content":[{"type":"text","text":"Stop hook feedback: too long"}]}}"#,
             r#"{"type":"system","subtype":"compact_boundary"}"#,
             r#"{"type":"user","isCompactSummary":true,"message":{"content":"This session is being continued"}}"#,
@@ -342,7 +356,7 @@ mod tests {
             r#"{"type":"assistant","message":{"content":[{"type":"text","text":"No response requested."}]}}"#,
         ];
         let l = last_in(lines.into_iter());
-        let turns = vec![("first".into(), "one".into()), ("second\nand this".into(), "two".into()), ("cut short".into(), String::new()), ("! ls".into(), "Two files.".into()), ("And now?".into(), String::new())];
+        let turns = vec![("first".into(), "one".into()), ("second\nand this\n- hi\n-- web".into(), "two".into()), ("cut short".into(), String::new()), ("! ls".into(), "Two files.".into()), ("And now?".into(), String::new())];
         assert_eq!(l, Last { turns, model: "claude-opus-5-5".into(), context: 100 });
     }
 }

@@ -36,6 +36,8 @@ pub enum Event {
     Stopped,
     /// Claude Code took in this prompt (it echoes each one when it reads it).
     Taken(String),
+    /// What other sessions sent, handed over by the fleet bus hook.
+    Mail(String),
     /// Context in use after the last call to the model, in tokens.
     Context(u64),
     /// Claude Code asks whether a tool may run.
@@ -66,6 +68,12 @@ pub fn read(v: &Value) -> Vec<Event> {
                 model: s(v, "model"),
                 version: s(v, "claude_code_version"),
             });
+        }
+        "system" if v["subtype"] == "hook_response" && v["hook_event"] == "UserPromptSubmit" => {
+            let said: Value = serde_json::from_str(v["stdout"].as_str().unwrap_or("")).unwrap_or_default();
+            if let Some(m) = said["hookSpecificOutput"]["additionalContext"].as_str().and_then(mail) {
+                out.push(Event::Mail(m));
+            }
         }
         "assistant" => {
             for b in v["message"]["content"].as_array().into_iter().flatten() {
@@ -109,7 +117,9 @@ pub fn read(v: &Value) -> Vec<Event> {
                     }),
                     Some("text") => {
                         let t = s(b, "text");
-                        if let Some(rest) = t.strip_prefix("Stop hook feedback:") {
+                        if let Some(m) = mail(&t) {
+                            out.push(Event::Mail(m));
+                        } else if let Some(rest) = t.strip_prefix("Stop hook feedback:") {
                             let said = rest.lines().map(str::trim).filter(|l| !l.is_empty());
                             // The first line names the check; the second says what it found.
                             let found = said.clone().nth(1).or(said.clone().next()).unwrap_or("");
@@ -154,6 +164,19 @@ pub fn read(v: &Value) -> Vec<Event> {
         _ => {}
     }
     out
+}
+
+/// The first words of the fleet bus hook's text.
+pub const MAIL: &str = "Messages delivered via the fleet bus";
+
+/// What other sessions sent, from the fleet bus hook's text without its
+/// header. The hook hands it over with a prompt, or at the end of a turn.
+pub fn mail(text: &str) -> Option<String> {
+    let text = text.strip_prefix("Stop hook feedback:").unwrap_or(text).trim_start();
+    let (head, body) = text.split_once('\n')?;
+    let body = body.trim_end();
+    let body = body.strip_suffix("Deal with these before you stop.").unwrap_or(body).trim();
+    (head.starts_with(MAIL) && !body.is_empty()).then(|| body.to_string())
 }
 
 /// A tool result's text: a string, or a list of blocks with text in them.
@@ -230,6 +253,8 @@ impl Claude {
         cmd.args(["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"]);
         // An echo of each prompt when Claude reads it, for prompts sent mid-turn.
         cmd.arg("--replay-user-messages");
+        // Each hook's output, for the messages the fleet bus hook hands over.
+        cmd.arg("--include-hook-events");
         // Permission questions come to deck instead of being refused.
         cmd.args(["--permission-prompts", "host"]);
         cmd.args([if resume { "--resume" } else { "--session-id" }, id]);
@@ -250,6 +275,10 @@ impl Claude {
         std::thread::spawn(move || {
             for line in BufReader::new(out).lines() {
                 let Ok(line) = line else { break };
+                // Every hook run reports twice; only fleet mail is read.
+                if line.contains(r#""subtype":"hook_"#) && !line.contains(MAIL) {
+                    continue;
+                }
                 let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
                 let events = read(&v);
                 if events.is_empty() {
@@ -332,6 +361,19 @@ mod tests {
         assert_eq!(call[1], Event::Context(100));
         let done = ev(r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"hi","is_error":false}]}}"#);
         assert_eq!(done, vec![Event::Done { id: "t1".into(), failed: false, output: "hi".into() }]);
+    }
+
+    #[test]
+    fn a_message_from_another_session_comes_with_a_prompt_or_at_the_end() {
+        let head = "Messages delivered via the fleet bus (from other local sessions or the fleet TUI):";
+        let said = json!({"hookSpecificOutput": {"additionalContext": format!("{head}\n- deck is yours\n-- fe2o3")}});
+        let hook = json!({"type": "system", "subtype": "hook_response", "hook_event": "UserPromptSubmit", "stdout": said.to_string()});
+        assert_eq!(read(&hook), vec![Event::Mail("- deck is yours\n-- fe2o3".into())]);
+        let end = format!("Stop hook feedback:\n{head}\n- deck is yours\n-- fe2o3\n\nDeal with these before you stop.");
+        let stop = json!({"type": "user", "message": {"content": [{"type": "text", "text": end}]}});
+        assert_eq!(read(&stop), vec![Event::Mail("- deck is yours\n-- fe2o3".into())]);
+        let other = json!({"type": "system", "subtype": "hook_response", "hook_event": "UserPromptSubmit", "stdout": "{}"});
+        assert!(read(&other).is_empty());
     }
 
     #[test]

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.15 (2026-10-27)
+
+- A message from another session, handed over by the fleet bus hook,
+  shows as a prompt in the turn it came in, also after a restart.
+  Claude Code now reports hook output to deck; deck reads only the
+  fleet lines and skips the rest before parsing them.
+
 ## 0.1.14 (2026-10-27)
 
 - The session's name in the top bar is purple (colour 13), as in fleet and

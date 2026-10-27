@@ -30,6 +30,8 @@ user@host ~/src/myproject [Opus 5.5 high] [12%] ...
 - The prompt grows to as many rows as it needs, up to a third of the
   screen. Shift+Enter, C-J, or `\` then Enter starts a new line.
 - Enter on a closed session in fleet opens it in deck.
+- A message from another session (fleet's bus) shows as a prompt in the
+  turn it came in, as if you had typed it.
 - When Claude asks a multiple-choice question, it opens as a menu. Esc
   closes it, and Claude is told the question went unanswered.
 - When a turn ends, or Claude asks something, while another window is in
