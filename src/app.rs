@@ -53,6 +53,8 @@ const KEYS: &[(&str, &str)] = &[
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const BLUE: u8 = 39;
+/// The session's name, in the purple fleet and Claude Code's status line use.
+const PURPLE: u8 = 13;
 const CODE: u8 = 179;
 const GREEN: u8 = 78;
 const RED: u8 = 203;
@@ -1186,8 +1188,8 @@ impl App {
             style::fg("○ ready", GREEN)
         };
         let mut left = match &self.tab_line {
-            Some(tabs) => format!("{tabs} {}  {}", style::fg(&self.name(), BLUE), state),
-            None => format!(" {}  {}  {}", style::bold("deck"), style::fg(&self.name(), BLUE), state),
+            Some(tabs) => format!("{tabs} {}  {}", style::fg(&self.name(), PURPLE), state),
+            None => format!(" {}  {}  {}", style::bold("deck"), style::fg(&self.name(), PURPLE), state),
         };
         if let Some(f) = &self.flash {
             left += &style::dim(&format!(" · {f}"));

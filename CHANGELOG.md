@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.14 (2026-10-27)
+
+- The session's name in the top bar is purple (colour 13), as in fleet and
+  in Claude Code's status line.
+
 ## 0.1.13 (2026-10-27)
 
 - Under gluon, the line above the prompt is light green while deck has the
