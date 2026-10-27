@@ -233,6 +233,8 @@ pub struct Claude {
     child: Child,
     stdin: Option<ChildStdin>,
     asked: u64,
+    /// Held with SIGSTOP while idle; the next thing sent lets it go on.
+    paused: bool,
 }
 
 impl Claude {
@@ -294,10 +296,38 @@ impl Claude {
             let _ = tx.send(Event::Gone);
             wake();
         });
-        Ok(Claude { child, stdin, asked: 0 })
+        Ok(Claude { child, stdin, asked: 0, paused: false })
+    }
+
+    /// Hold it while idle: an idle Claude Code still wakes about 25 times
+    /// a second, 30 to 70 mW. A paused one costs nothing and stays in
+    /// fleet's list. Not while it runs a process of its own (a background
+    /// job, a monitor), whose end should wake it. True when paused.
+    pub fn pause(&mut self) -> bool {
+        if !self.paused && !self.has_children() {
+            self.paused = unsafe { libc::kill(self.child.id() as i32, libc::SIGSTOP) } == 0;
+        }
+        self.paused
+    }
+
+    fn go_on(&mut self) {
+        if self.paused {
+            unsafe {
+                libc::kill(self.child.id() as i32, libc::SIGCONT);
+            }
+            self.paused = false;
+        }
+    }
+
+    fn has_children(&self) -> bool {
+        let tasks = std::fs::read_dir(format!("/proc/{}/task", self.child.id()));
+        tasks.into_iter().flatten().flatten().any(|t| {
+            std::fs::read_to_string(t.path().join("children")).is_ok_and(|c| !c.trim().is_empty())
+        })
     }
 
     fn send(&mut self, v: Value) {
+        self.go_on();
         if let Some(i) = self.stdin.as_mut() {
             let _ = writeln!(i, "{v}").and_then(|_| i.flush());
         }
@@ -327,6 +357,7 @@ impl Claude {
     /// Close its input, so it ends on its own; that takes it most of a
     /// second, which deck does not wait for. A turn still running is cut.
     pub fn stop(&mut self, busy: bool) {
+        self.go_on();
         self.stdin = None;
         if busy {
             let _ = self.child.kill();
@@ -404,6 +435,39 @@ mod tests {
     fn a_permission_question() {
         let ask = ev(r#"{"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"rm x"}}}"#);
         assert_eq!(ask, vec![Event::Ask { id: "r1".into(), tool: "Bash".into(), input: json!({"command": "rm x"}) }]);
+    }
+
+    #[test]
+    fn an_idle_claude_is_paused_unless_it_runs_a_job_of_its_own() {
+        // A signal lands a moment after it is sent.
+        let state = |c: &Claude| {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            let st = std::fs::read_to_string(format!("/proc/{}/stat", c.child.id())).unwrap();
+            st.rsplit(") ").next().unwrap().chars().next().unwrap()
+        };
+        let dir = std::env::temp_dir().join(format!("deck-pause-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let start = |script: &str| {
+            let path = dir.join("claude");
+            std::fs::write(&path, format!("#!/bin/sh\n{script}\n")).unwrap();
+            std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+            std::env::set_var("DECK_CLAUDE", &path);
+            let errors = File::create(dir.join("err")).unwrap();
+            let c = Claude::start("x", false, "/", &[], errors, std::sync::mpsc::channel().0).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            c
+        };
+        let mut idle = start("exec sleep 30");
+        assert!(idle.pause());
+        assert_eq!(state(&idle), 'T');
+        idle.say("hi");
+        assert_ne!(state(&idle), 'T');
+        idle.stop(true);
+        let mut working = start("sleep 30 & exec sleep 30");
+        assert!(!working.pause());
+        assert_ne!(state(&working), 'T');
+        working.stop(true);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

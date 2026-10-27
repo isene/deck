@@ -13,7 +13,7 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 const USAGE: &str = "deck: a paned front for Claude Code
 
@@ -129,6 +129,10 @@ pub struct App {
     pushed: VecDeque<String>,
     asks: VecDeque<(String, String, Value)>,
     busy: Option<Instant>,
+    /// Since when Claude has been idle and running; None once paused.
+    quiet: Option<Instant>,
+    /// How long idle before Claude is paused: DECK_PARK seconds, else 600.
+    park: Duration,
     /// When the step Claude is on began: a tool call, its end, or a note.
     step: Instant,
     /// deck was built again since it started; the foot says so.
@@ -275,10 +279,15 @@ impl App {
     /// One turn of the main loop is `before_wait`, a wait of at most the
     /// seconds it gives for a key, then `after_wait` with the key or None.
     /// While Claude works the bar shows the time, so it wakes once a
-    /// second; otherwise it sleeps until a key, or until Claude's output
-    /// arrives (the reader then sends SIGWINCH, read as "RESIZE").
+    /// second; otherwise it sleeps until a key, until Claude's output
+    /// arrives (the reader then sends SIGWINCH, read as "RESIZE"), or
+    /// once to pause an idle Claude.
     pub fn before_wait(&self) -> u64 {
-        if self.busy.is_some() { 1 } else { 86400 }
+        match (self.busy, self.quiet) {
+            (Some(_), _) => 1,
+            (None, Some(t)) => self.park.saturating_sub(t.elapsed()).as_secs().max(1),
+            (None, None) => 86400,
+        }
     }
 
     pub fn after_wait(&mut self, key: Option<String>) {
@@ -297,6 +306,11 @@ impl App {
         // Cleared before the drain, so an event sent after it wakes again.
         WAKE.store(false, Ordering::SeqCst);
         self.drain();
+        // Idle long enough: pause Claude. With a job of its own running it
+        // stays awake, and is asked again after the same wait.
+        if self.busy.is_none() && self.quiet.is_some_and(|t| t.elapsed() >= self.park) {
+            self.quiet = (!self.claude.pause()).then(Instant::now);
+        }
         self.draw_bar();
         // A rebuild shows at the next wake, not after the turn. Once old,
         // deck stays old, so the check stops.
@@ -396,6 +410,8 @@ impl App {
             pushed: VecDeque::new(),
             asks: VecDeque::new(),
             busy: None,
+            quiet: Some(Instant::now()),
+            park: Duration::from_secs(std::env::var("DECK_PARK").ok().and_then(|v| v.parse().ok()).unwrap_or(600)),
             step: Instant::now(),
             old: false,
             ended: None,
@@ -546,6 +562,7 @@ impl App {
                     // Prompts sent with C-Enter run next; the purple ones wait for them.
                     if self.pushed.is_empty() {
                         self.busy = None;
+                        self.quiet = Some(Instant::now());
                         if let Some(next) = self.waiting.pop_front() {
                             self.send(next);
                         }
@@ -560,6 +577,7 @@ impl App {
                     let tail: Vec<&str> = text.lines().rev().take(15).collect();
                     self.ended = Some(tail.into_iter().rev().collect::<Vec<_>>().join("\n"));
                     self.busy = None;
+                    self.quiet = None;
                     self.asks.clear();
                     self.pushed.clear();
                     self.log.push(Line::Ended);

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.16 (2026-10-27)
+
+- After 10 minutes with no turn, deck pauses Claude Code with SIGSTOP and
+  lets it go on with the next prompt. An idle Claude Code woke about 25
+  times a second (30 to 70 mW); a paused one costs nothing and stays
+  listed in fleet. Not while Claude runs a job of its own.
+  `DECK_PARK=<seconds>` sets the wait.
+
 ## 0.1.15 (2026-10-27)
 
 - A message from another session, handed over by the fleet bus hook,

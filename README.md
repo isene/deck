@@ -83,6 +83,13 @@ Idle, deck uses no CPU: it waits on the keyboard, and the thread that reads
 Claude's output wakes it with a signal. While Claude works, the bar's clock
 wakes it once a second.
 
+Claude Code itself wakes about 25 times a second while idle, 30 to 70 mW.
+So after 10 minutes with no turn, deck pauses it (SIGSTOP), and the next
+prompt lets it go on (SIGCONT), with nothing to reload. A paused session
+still shows as open in fleet. While Claude runs a job of its own (a
+background command, a monitor), it is not paused, so the job's end can
+wake it. `DECK_PARK=<seconds>` sets the wait.
+
 ## Build
 
 ```
