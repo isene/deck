@@ -207,7 +207,7 @@ fn main() {
         app.draw_bar();
         app.place_cursor();
     }
-    app.claude.stop();
+    app.claude.stop(app.busy.is_some());
     Crust::disable_focus_reports();
     Crust::disable_modifier_keys();
     Crust::disable_bracketed_paste();

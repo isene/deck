@@ -10,6 +10,7 @@
 use serde_json::{json, Value};
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Write};
+use std::os::unix::process::CommandExt;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
@@ -226,7 +227,10 @@ impl Claude {
         for (k, v) in env {
             cmd.env(k, v);
         }
+        // Its own process group, so closing the window does not cut it off
+        // while it ends after deck.
         let mut child = cmd
+            .process_group(0)
             .current_dir(cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -282,17 +286,14 @@ impl Claude {
             "response": {"subtype": "success", "request_id": id, "response": response}}));
     }
 
-    /// Close its input, so it ends after the turn it is on; then end it.
-    pub fn stop(&mut self) {
+    /// Close its input, so it ends on its own; that takes it most of a
+    /// second, which deck does not wait for. A turn still running is cut.
+    pub fn stop(&mut self, busy: bool) {
         self.stdin = None;
-        for _ in 0..30 {
-            if let Ok(Some(_)) = self.child.try_wait() {
-                return;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(100));
+        if busy {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
         }
-        let _ = self.child.kill();
-        let _ = self.child.wait();
     }
 }
 

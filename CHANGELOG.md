@@ -18,6 +18,10 @@
 - Opening a session read its whole transcript, 773 MB for one, to find the
   folder it started in. deck now reads the first 200 KB; that open went
   from 479 to 52 ms.
+- C-D quits at once. deck waited for Claude Code to end, 0.7 s when idle and
+  up to 3 s in a turn. Now Claude Code ends on its own after deck has gone,
+  in its own process group so closing the window does not cut it off. A
+  turn still running is stopped, as before.
 - A session reopened after Claude Code compacted it showed the whole summary
   as the last prompt, in blue. deck now shows the prompt you typed.
 - A prompt sent while Claude works shows at once under the running turn,
