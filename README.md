@@ -46,7 +46,8 @@ deck <id>         open the session with this id
 |---|---|
 | Enter | send; while Claude works, the message waits its turn |
 | S-Enter, C-J, \\ Enter | a new line in the prompt |
-| Up, Down | the row above or below, else earlier prompts |
+| Up, Down | the row above or below, else earlier prompts, also from past runs |
+| !command | run it in a shell; Claude gets what it printed with the next prompt |
 | Esc | stop the turn Claude is on |
 | PgUp, PgDn | scroll the answers |
 | C-F | find in the answers; C-F then Enter finds the next |

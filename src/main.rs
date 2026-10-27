@@ -33,6 +33,7 @@ const KEYS: &[(&str, &str)] = &[
     ("S-Enter, C-J", "a new line in the prompt; so does \\ before Enter"),
     ("Esc", "stop the turn Claude is on"),
     ("Up, Down", "the row above or below, else earlier prompts"),
+    ("! command", "run it in a shell; Claude gets what it printed with the next prompt"),
     ("C-A, C-E", "to the start or end of the prompt"),
     ("C-U, C-K", "delete to the start or end of the prompt"),
     ("C-Backspace", "delete a word"),
@@ -108,6 +109,8 @@ struct App {
     at: usize,
     history: Vec<String>,
     back: usize,
+    /// What `!` commands printed, for Claude with the next prompt.
+    shell_out: String,
     detail: bool,
     /// The answer pane's share of the screen, in tenths (5 to 9).
     width: u16,
@@ -237,6 +240,7 @@ impl App {
     fn new(s: session::Session, last: session::Last, claude: Claude, tx: Sender<Event>, errors: String) -> App {
         let colour = session::colour(&s.tags);
         let window = known_window(&last.model);
+        let history = load_history(&s.cwd);
         let mut app = App {
             s,
             claude,
@@ -256,8 +260,9 @@ impl App {
             status: String::new(),
             input: Vec::new(),
             at: 0,
-            history: Vec::new(),
-            back: 0,
+            back: history.len(),
+            history,
+            shell_out: String::new(),
             detail: false,
             flash: None,
             width: cache()["width"].as_u64().map_or(7, |w| w.clamp(5, 9) as u16),
@@ -501,7 +506,8 @@ impl App {
     fn send(&mut self, text: String) {
         self.turns.push(Turn { prompt: text.clone(), answer: None, failed: false, log_at: self.log.len(), drawn: None });
         self.log.push(Line::Prompt(text.clone()));
-        self.claude.say(&text);
+        let out = std::mem::take(&mut self.shell_out);
+        self.claude.say(&format!("{out}{text}"));
         self.busy = Some(Instant::now());
         self.detail = false;
         self.fill_answer(true);
@@ -788,17 +794,18 @@ impl App {
 
     /// The terminal to a program, such as the editor or prism, until it
     /// quits.
-    fn hand_over(&self, cmd: &mut Command) {
+    fn hand_over(&self, cmd: &mut Command) -> Option<i32> {
         Crust::disable_focus_reports();
         Crust::disable_modifier_keys();
         Crust::disable_bracketed_paste();
         Crust::cleanup();
-        let _ = cmd.status();
+        let code = cmd.status().ok().and_then(|s| s.code());
         Crust::init();
         Crust::set_app_identity(&title(&self.s));
         Crust::enable_bracketed_paste();
         Crust::enable_ctrl_shift_keys();
         Crust::enable_focus_reports();
+        code
     }
 
     /// Up and Down move between the prompt's rows, and past the first or
@@ -835,16 +842,58 @@ impl App {
         if text.is_empty() || self.ended.is_some() {
             return;
         }
-        if self.history.last() != Some(&text) {
-            self.history.push(text.clone());
+        if let Some(cmd) = text.strip_prefix('!') {
+            if self.busy.is_some() {
+                self.flash = Some("a ! command waits until Claude's turn ends".into());
+                return;
+            }
+            self.remember(&text);
+            return self.shell(cmd.trim());
         }
-        self.back = self.history.len();
-        self.set_input("");
+        self.remember(&text);
         if self.busy.is_some() {
             self.waiting.push_back(text);
         } else {
             self.send(text);
         }
+    }
+
+    /// A sent prompt goes to Up and Down, and to Claude Code's own history
+    /// file, so both find it again.
+    fn remember(&mut self, text: &str) {
+        if self.history.last().map(String::as_str) != Some(text) {
+            self.history.push(text.to_string());
+        }
+        self.back = self.history.len();
+        self.set_input("");
+        let line = json!({"display": text, "pastedContents": {}, "timestamp": now_ms(),
+                          "project": self.s.cwd, "sessionId": self.s.id});
+        if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(history_file()) {
+            let _ = f.write_all(format!("{line}\n").as_bytes());
+        }
+    }
+
+    /// `!` runs a command on the terminal itself, so a password prompt
+    /// works. `script` keeps a copy of what it prints, which deck shows and
+    /// Claude gets with the next prompt, as in Claude Code.
+    fn shell(&mut self, cmd: &str) {
+        let log = self.errors.replace(".err", ".sh");
+        let mut run = Command::new("script");
+        run.args(["-qec", cmd, &log]).current_dir(&self.s.cwd);
+        let code = self.hand_over(&mut run);
+        let out = typescript(&fs::read_to_string(&log).unwrap_or_default());
+        let _ = fs::remove_file(&log);
+        let tail: String = out.chars().rev().take(30_000).collect::<Vec<_>>().into_iter().rev().collect();
+        self.shell_out += &format!("<bash-input>{cmd}</bash-input>\n<bash-stdout>{tail}</bash-stdout>\n");
+        let failed = code.is_some_and(|c| c != 0);
+        let mut answer = format!("```\n{out}\n```");
+        if let Some(c) = code.filter(|_| failed) {
+            answer += &format!("\nexit {c}");
+        }
+        let prompt = format!("! {cmd}");
+        self.turns.push(Turn { prompt: prompt.clone(), answer: Some(answer), failed, log_at: self.log.len(), drawn: None });
+        self.log.push(Line::Prompt(prompt));
+        self.layout();
     }
 
     // ------------------------------------------------------------------
@@ -1199,6 +1248,54 @@ fn cache_file() -> String {
     format!("{dir}/deck.json")
 }
 
+fn history_file() -> String {
+    format!("{}/.claude/history.jsonl", std::env::var("HOME").unwrap_or_default())
+}
+
+fn now_ms() -> u128 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis())
+}
+
+/// The prompts sent in `project`, oldest first, from the end of Claude
+/// Code's history file: Up shows the same ones there and here.
+fn load_history(project: &str) -> Vec<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut f) = fs::File::open(history_file()) else { return Vec::new() };
+    let len = f.metadata().map_or(0, |m| m.len());
+    let mut buf = Vec::new();
+    if f.seek(SeekFrom::Start(len.saturating_sub(1 << 20))).is_err() || f.read_to_end(&mut buf).is_err() {
+        return Vec::new();
+    }
+    history_in(&String::from_utf8_lossy(&buf), project)
+}
+
+fn history_in(text: &str, project: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for v in text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()) {
+        let Some(d) = v["display"].as_str().filter(|d| !d.trim().is_empty()) else { continue };
+        if v["project"].as_str() == Some(project) && out.last().map(String::as_str) != Some(d) {
+            out.push(d.to_string());
+        }
+    }
+    let skip = out.len().saturating_sub(200);
+    out.split_off(skip)
+}
+
+/// What a command printed, from the log `script` keeps: its first and
+/// last lines are script's own, a carriage return starts the line over,
+/// and colour codes go.
+fn typescript(raw: &str) -> String {
+    let mut lines: Vec<String> = raw
+        .lines()
+        .filter(|l| !l.starts_with("Script started on ") && !l.starts_with("Script done on "))
+        .map(|l| crust::strip_ansi(l.trim_end_matches('\r').rsplit('\r').next().unwrap_or("")))
+        .collect();
+    while lines.last().is_some_and(|l| l.trim().is_empty()) {
+        lines.pop();
+    }
+    lines.join("\n")
+}
+
 fn cache() -> Value {
     fs::read_to_string(cache_file()).ok().and_then(|s| serde_json::from_str(&s).ok()).filter(Value::is_object).unwrap_or(json!({}))
 }
@@ -1303,6 +1400,25 @@ fn hyperlist(md: &str, width: usize) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn history_is_the_projects_own_prompts() {
+        let text = [
+            r#"{"display":"one","project":"/a"}"#,
+            r#"{"display":"other","project":"/b"}"#,
+            r#"{"display":"two","project":"/a"}"#,
+            r#"{"display":"two","project":"/a"}"#,
+            r#"{"display":" ","project":"/a"}"#,
+            "cut mid-line",
+        ].join("\n");
+        assert_eq!(history_in(&text, "/a"), vec!["one", "two"]);
+    }
+
+    #[test]
+    fn a_shell_log_keeps_only_what_the_command_printed() {
+        let raw = "Script started on 2026-10-27 [COMMAND=\"x\"]\nhi\r\n50%\r100%\r\n\x1b[01;34mboot\x1b[0m\r\n\nScript done on 2026-10-27 [COMMAND_EXIT_CODE=\"3\"]\n";
+        assert_eq!(typescript(raw), "hi\n100%\nboot");
+    }
 
     #[test]
     fn the_hyperlist_hook_gets_the_table_as_written() {

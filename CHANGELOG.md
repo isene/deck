@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.8 (2026-10-27)
+
+- Up and Down reach the prompts of earlier runs in this folder, from deck
+  and from Claude Code alike. deck now writes its prompts to Claude Code's
+  `~/.claude/history.jsonl`, so they show up there too.
+- `!command` runs the command in a shell, in the session's folder, with
+  the terminal handed over. Claude gets what it printed with the next
+  prompt, as in Claude Code.
+
 ## 0.1.7 (2026-10-26)
 
 - With the HyperList drawing on, a table in an answer becomes HyperList
