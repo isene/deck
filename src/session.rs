@@ -194,7 +194,8 @@ pub fn last_in<'a>(lines: impl Iterator<Item = &'a str>) -> Last {
     let mut l = Last::default();
     for line in lines {
         let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
-        if v["isMeta"].as_bool() == Some(true) || v["isSidechain"].as_bool() == Some(true) {
+        // A compaction writes its summary as a user line; it is no prompt.
+        if ["isMeta", "isSidechain", "isCompactSummary"].iter().any(|k| v[k].as_bool() == Some(true)) {
             continue;
         }
         let m = &v["message"];
@@ -281,6 +282,8 @@ mod tests {
             r#"{"type":"user","message":{"content":[{"type":"tool_result","content":"ok"}]}}"#,
             r#"{"type":"user","isMeta":true,"message":{"content":"meta"}}"#,
             r#"{"type":"user","message":{"content":[{"type":"text","text":"Stop hook feedback: too long"}]}}"#,
+            r#"{"type":"system","subtype":"compact_boundary"}"#,
+            r#"{"type":"user","isCompactSummary":true,"message":{"content":"This session is being continued"}}"#,
             r#"{"type":"assistant","message":{"content":[{"type":"text","text":"two"}]}}"#,
         ];
         let l = last_in(lines.into_iter());
