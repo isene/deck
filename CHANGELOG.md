@@ -33,6 +33,9 @@
   top line showed it.
 - "deck v… is old: restart" shows in bold amber, as in kastrup and tock.
   Before, it was dim grey like the version beside it.
+- C-T also shows the last turn's tool calls in full, as C-O does. Under
+  gluon, where deck is the Claude tab, C-O moves to the next tab.
+- deck is a library too (`src/app.rs`), so gluon can run it as a tab.
 
 ## 0.1.7 (2026-10-26)
 
