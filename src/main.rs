@@ -110,6 +110,8 @@ struct App {
     at: usize,
     history: Vec<String>,
     back: usize,
+    /// What was typed before Up went back through the history.
+    draft: String,
     /// What `!` commands printed, for Claude with the next prompt.
     shell_out: String,
     detail: bool,
@@ -264,6 +266,7 @@ impl App {
             back: history.len(),
             history,
             shell_out: String::new(),
+            draft: String::new(),
             detail: false,
             flash: None,
             width: cache()["width"].as_u64().map_or(7, |w| w.clamp(5, 9) as u16),
@@ -818,12 +821,15 @@ impl App {
         if let Some(n) = to {
             self.at = at_column(rows[n], &self.input, col);
         } else if up && self.back > 0 {
+            if self.back == self.history.len() {
+                self.draft = self.input.iter().collect();
+            }
             self.back -= 1;
             let h = self.history[self.back].clone();
             self.set_input(&h);
         } else if !up && self.back < self.history.len() {
             self.back += 1;
-            let h = self.history.get(self.back).cloned().unwrap_or_default();
+            let h = self.history.get(self.back).cloned().unwrap_or_else(|| std::mem::take(&mut self.draft));
             self.set_input(&h);
         }
     }
@@ -867,6 +873,7 @@ impl App {
             self.history.push(text.to_string());
         }
         self.back = self.history.len();
+        self.draft.clear();
         self.set_input("");
         let line = json!({"display": text, "pastedContents": {}, "timestamp": now_ms(),
                           "project": self.s.cwd, "sessionId": self.s.id});
