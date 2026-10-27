@@ -4,6 +4,9 @@
 
 - The prompt sits on the answer pane's colour under a thin line, instead
   of in a black strip of its own. It takes one row more.
+- The tool log on the right shows every line of a prompt, not only the
+  first, leaving out blank lines. A prompt longer than ten lines ends
+  in "… N more lines".
 
 ## 0.1.10 (2026-10-27)
 

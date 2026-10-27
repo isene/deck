@@ -1424,10 +1424,26 @@ fn waiting_text<'a>(waiting: impl Iterator<Item = &'a String>) -> String {
     lines.join("\n")
 }
 
+/// A prompt in the log: its lines without the blank ones, up to ten.
+fn prompt_lines(p: &str) -> String {
+    const MOST: usize = 10;
+    let lines: Vec<&str> = p.lines().filter(|l| !l.trim().is_empty()).collect();
+    let mut out: Vec<String> = lines
+        .iter()
+        .take(MOST)
+        .enumerate()
+        .map(|(i, l)| style::fg(&format!("{} {l}", if i == 0 { "›" } else { " " }), BLUE))
+        .collect();
+    if lines.len() > MOST {
+        out.push(style::dim(&format!("  … {} more lines", lines.len() - MOST)));
+    }
+    out.join("\n")
+}
+
 fn log_line(l: &Line) -> String {
     let first = |s: &str| s.lines().next().unwrap_or("").to_string();
     match l {
-        Line::Prompt(p) => style::fg(&format!("› {}", first(p)), BLUE),
+        Line::Prompt(p) => prompt_lines(p),
         Line::Tool(t) => {
             let mark = match t.failed {
                 None => style::fg("·", AMBER),
@@ -1603,6 +1619,15 @@ fn hyperlist(md: &str, width: usize) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_log_shows_every_line_of_a_prompt() {
+        assert_eq!(crust::strip_ansi(&prompt_lines("1. yes\n\n2. half")), "› 1. yes\n  2. half");
+        let long = (1..=12).map(|i| i.to_string()).collect::<Vec<_>>().join("\n");
+        let shown = crust::strip_ansi(&prompt_lines(&long));
+        assert_eq!(shown.lines().count(), 11);
+        assert!(shown.ends_with("… 2 more lines"));
+    }
 
     #[test]
     fn a_waiting_prompt_is_drawn() {
