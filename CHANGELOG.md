@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.13 (2026-10-27)
+
+- Under gluon, the line above the prompt is light green while deck has the
+  keys, the colour gluon gives the frame of the box that has them.
+
 ## 0.1.12 (2026-10-27)
 
 - The prompt is back on black under the thin grey line, with a black row
@@ -10,8 +15,6 @@
 - Answer text is white. It was light grey, and a line with a coloured word
   turned white after that word.
 - The top bar has the same grey as the status line at the bottom.
-- Under gluon, the line above the prompt is light green while deck has the
-  keys, the colour gluon gives the frame of the box that has them.
 - A long prompt breaks between words, so a word moves whole to the next
   row; only a word longer than a row is cut.
 
