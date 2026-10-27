@@ -17,7 +17,7 @@ user@host ~/src/myproject [Opus 5.5 high] [12%] ...
 
 - The answer gets the big pane. New text comes in at the bottom, as in a
   terminal, and PgUp/PgDn scroll back. While you read further up, the
-  pane stays where you are.
+  pane stays where you are. A reopened session shows its last ten turns.
 - Each tool call is one line in the log on the right: ✓ when it worked,
   ✗ when it failed. C-O shows the last turn's calls with their output.
 - When a stop hook sends an answer back, you see only the rewrite, and one

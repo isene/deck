@@ -42,8 +42,9 @@ pub fn transcript(id: &str) -> Option<PathBuf> {
 
 /// The directory a session started in: the first `cwd` in its transcript.
 fn first_cwd(id: &str) -> Option<String> {
-    let text = fs::read(transcript(id)?).ok()?;
-    let head = String::from_utf8_lossy(&text[..text.len().min(200_000)]).into_owned();
+    let mut text = Vec::new();
+    fs::File::open(transcript(id)?).ok()?.take(200_000).read_to_end(&mut text).ok()?;
+    let head = String::from_utf8_lossy(&text).into_owned();
     head.lines()
         .filter_map(|l| serde_json::from_str::<Value>(l).ok())
         .find_map(|v| v["cwd"].as_str().map(str::to_string))
@@ -157,15 +158,19 @@ pub fn open_elsewhere(id: &str) -> Option<u32> {
     None
 }
 
-/// What the end of a transcript tells: the last prompt and its answer,
-/// the model, and the context in use.
+/// What the end of a transcript tells: the last prompts, each with its
+/// answer, the model, and the context in use.
 #[derive(Default, Debug, PartialEq)]
 pub struct Last {
-    pub prompt: String,
-    pub answer: String,
+    pub turns: Vec<(String, String)>,
     pub model: String,
     pub context: u64,
 }
+
+/// How many past turns a reopened session shows.
+const TURNS: usize = 10;
+/// Ten turns lie 1 to 30 MB from the end of the transcripts measured.
+const MOST: u64 = 32 << 20;
 
 /// Read only the end of the transcript: they reach hundreds of megabytes.
 pub fn last(id: &str) -> Last {
@@ -183,7 +188,7 @@ pub fn last(id: &str) -> Last {
         // The first line is cut in two unless the read began at the start.
         let lines = text.lines().skip(usize::from(from > 0));
         let found = last_in(lines);
-        if !found.prompt.is_empty() || from == 0 {
+        if found.turns.len() >= TURNS || from == 0 || (span >= MOST && !found.turns.is_empty()) {
             return found;
         }
         span *= 4;
@@ -193,6 +198,14 @@ pub fn last(id: &str) -> Last {
 pub fn last_in<'a>(lines: impl Iterator<Item = &'a str>) -> Last {
     let mut l = Last::default();
     for line in lines {
+        // Most of a transcript is tool output, attachments and request
+        // records, never a prompt or an answer: skip it before the parse.
+        let has = |k: &str| line.contains(k);
+        let prompt = has(r#""type":"user""#) && !has(r#""type":"tool_result""#);
+        let answer = has(r#""type":"assistant""#) && has(r#""type":"text""#);
+        if !(prompt || answer) {
+            continue;
+        }
         let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
         // A compaction writes its summary as a user line; it is no prompt.
         if ["isMeta", "isSidechain", "isCompactSummary"].iter().any(|k| v[k].as_bool() == Some(true)) {
@@ -214,13 +227,12 @@ pub fn last_in<'a>(lines: impl Iterator<Item = &'a str>) -> Last {
                 if t.is_empty() || t.starts_with('<') || t.starts_with('[') || t.starts_with("Stop hook feedback") {
                     continue;
                 }
-                l.prompt = t.to_string();
-                l.answer.clear();
+                l.turns.push((t.to_string(), String::new()));
             }
             Some("assistant") => {
                 for b in m["content"].as_array().into_iter().flatten() {
-                    if let Some(t) = b["text"].as_str().filter(|t| !t.trim().is_empty()) {
-                        l.answer = t.trim().to_string();
+                    if let (Some(t), Some(turn)) = (b["text"].as_str().filter(|t| !t.trim().is_empty()), l.turns.last_mut()) {
+                        turn.1 = t.trim().to_string();
                     }
                 }
                 if let Some(model) = m["model"].as_str().filter(|s| s.starts_with("claude")) {
@@ -238,6 +250,8 @@ pub fn last_in<'a>(lines: impl Iterator<Item = &'a str>) -> Last {
             _ => {}
         }
     }
+    let cut = l.turns.len().saturating_sub(TURNS);
+    l.turns.drain(..cut);
     l
 }
 
@@ -273,6 +287,23 @@ mod tests {
     }
 
     #[test]
+    fn a_reopened_session_keeps_the_last_ten_turns() {
+        let lines: Vec<String> = (0..12)
+            .flat_map(|i| {
+                [
+                    format!(r#"{{"type":"user","message":{{"content":"p{i}"}}}}"#),
+                    format!(r#"{{"type":"attachment","message":{{"content":"a{i}"}}}}"#),
+                    format!(r#"{{"type":"assistant","message":{{"content":[{{"type":"text","text":"a{i}"}}]}}}}"#),
+                ]
+            })
+            .collect();
+        let l = last_in(lines.iter().map(String::as_str));
+        assert_eq!(l.turns.len(), 10);
+        assert_eq!(l.turns[0], ("p2".into(), "a2".into()));
+        assert_eq!(l.turns[9], ("p11".into(), "a11".into()));
+    }
+
+    #[test]
     fn the_last_answer_follows_the_last_real_prompt() {
         let lines = [
             r#"{"type":"user","message":{"content":"first"}}"#,
@@ -287,6 +318,7 @@ mod tests {
             r#"{"type":"assistant","message":{"content":[{"type":"text","text":"two"}]}}"#,
         ];
         let l = last_in(lines.into_iter());
-        assert_eq!(l, Last { prompt: "second".into(), answer: "two".into(), model: "claude-opus-5-5".into(), context: 100 });
+        let turns = vec![("first".into(), "one".into()), ("second".into(), "two".into())];
+        assert_eq!(l, Last { turns, model: "claude-opus-5-5".into(), context: 100 });
     }
 }

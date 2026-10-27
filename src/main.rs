@@ -281,9 +281,9 @@ impl App {
             line: Pane::new(1, 1, 1, 1, 231, 0),
             foot: Pane::new(1, 1, 1, 1, 252, 0),
         };
-        if !last.prompt.is_empty() {
-            app.log.push(Line::Prompt(last.prompt.clone()));
-            app.turns.push(Turn { prompt: last.prompt, answer: Some(last.answer), failed: false, log_at: 0, drawn: None });
+        for (prompt, answer) in last.turns {
+            app.turns.push(Turn { prompt: prompt.clone(), answer: Some(answer), failed: false, log_at: app.log.len(), drawn: None });
+            app.log.push(Line::Prompt(prompt));
         }
         app
     }

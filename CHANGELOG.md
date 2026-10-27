@@ -12,6 +12,12 @@
 - The answer pane follows its end, as a terminal does, so the answer before
   stays in view under a new prompt. Scrolled up to read, it stays put.
   Before, each new prompt jumped to the top of the pane.
+- A reopened session shows its last ten turns, not only the last one. deck
+  reads up to 32 MB from the end of the transcript for them, 1 to 63 ms on
+  the biggest transcripts here, and parses only prompt and answer lines.
+- Opening a session read its whole transcript, 773 MB for one, to find the
+  folder it started in. deck now reads the first 200 KB; that open went
+  from 479 to 52 ms.
 - A session reopened after Claude Code compacted it showed the whole summary
   as the last prompt, in blue. deck now shows the prompt you typed.
 - A prompt sent while Claude works shows at once under the running turn,
