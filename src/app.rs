@@ -118,6 +118,8 @@ pub struct App {
     busy: Option<Instant>,
     /// When the step Claude is on began: a tool call, its end, or a note.
     step: Instant,
+    /// deck was built again since it started; the foot says so.
+    old: bool,
     ended: Option<String>,
     errors: String,
     status: String,
@@ -279,6 +281,11 @@ impl App {
         WAKE.store(false, Ordering::SeqCst);
         self.drain();
         self.draw_bar();
+        // A rebuild shows at the next wake, not after the turn. Once old,
+        // deck stays old, so the check stops.
+        if !self.old && rebuilt() {
+            self.draw_foot();
+        }
         self.place_cursor();
     }
 
@@ -338,6 +345,7 @@ impl App {
             asks: VecDeque::new(),
             busy: None,
             step: Instant::now(),
+            old: false,
             ended: None,
             errors,
             status: String::new(),
@@ -1135,7 +1143,8 @@ impl App {
     /// The status line, and deck's version at the right, as in the other
     /// Fe2O3 programs.
     fn draw_foot(&mut self) {
-        let old = rebuilt();
+        self.old = rebuilt();
+        let old = self.old;
         let version = if old { format!("deck v{VERSION} is old: restart ") } else { format!("deck v{VERSION} ") };
         let room = (self.foot.w as usize).saturating_sub(version.len() + 1);
         let status = crust::truncate_ansi(&self.status, room);

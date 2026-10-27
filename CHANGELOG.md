@@ -5,6 +5,9 @@
 - Claude reads what a `!command` printed as soon as it ends, and answers
   it, so a script run in deck gets a reply. Before, the output waited for
   the next prompt. A reopened session shows such a turn as `! command`.
+- "deck is old: restart" shows in amber at the next second of a turn, or
+  the next key, after a rebuild. Before, it waited until the turn ended.
+  The check is one readlink per wake, and it stops once deck is old.
 
 ## 0.1.9 (2026-10-27)
 
