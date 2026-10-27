@@ -112,6 +112,9 @@ pub struct App {
     /// Under gluon: deck drew outside its area (a popup, the editor), so
     /// the rest of the screen wants drawing again.
     over: bool,
+    /// Under gluon's Home tab: false while one of its boxes has the keys,
+    /// so the cursor stays hidden.
+    focus: bool,
     model: String,
     version: String,
     context: u64,
@@ -326,6 +329,14 @@ impl App {
         self.layout();
     }
 
+    /// Under gluon's Home tab: the keys go to deck (true) or to one of
+    /// Home's boxes; the bar shows the tab line set before.
+    pub fn set_focus(&mut self, on: bool) {
+        self.focus = on;
+        self.draw_bar();
+        self.place_cursor();
+    }
+
     /// True once after deck drew outside its area.
     pub fn take_overdraw(&mut self) -> bool {
         std::mem::take(&mut self.over)
@@ -360,6 +371,7 @@ impl App {
             area: None,
             size: (0, 0),
             over: false,
+            focus: true,
             model: last.model,
             version: String::new(),
             context: last.context,
@@ -1276,7 +1288,7 @@ impl App {
     }
 
     pub fn place_cursor(&self) {
-        if !self.asks.is_empty() || self.ended.is_some() {
+        if !self.focus || !self.asks.is_empty() || self.ended.is_some() {
             print!("{}", seq::HIDE);
         } else {
             let rows = input_rows(&self.input, self.line.w as usize);
