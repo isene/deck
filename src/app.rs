@@ -120,6 +120,8 @@ pub struct App {
     step: Instant,
     /// deck was built again since it started; the foot says so.
     old: bool,
+    /// A thin line above the prompt.
+    rule: Pane,
     ended: Option<String>,
     errors: String,
     status: String,
@@ -366,6 +368,7 @@ impl App {
             side: None,
             gap: None,
             line: Pane::new(1, 1, 1, 1, 231, 0),
+            rule: Pane::new(1, 1, 1, 1, 240, 0),
             foot: Pane::new(1, 1, 1, 1, 252, 0),
         };
         for (prompt, answer) in last.turns {
@@ -1058,7 +1061,7 @@ impl App {
         let (cols, rows) = Crust::terminal_size();
         self.rows = rows;
         let n = self.input_height(cols);
-        let h = rows.saturating_sub(2 + n).max(1);
+        let h = rows.saturating_sub(3 + n).max(1);
         let sw = if cols >= 80 { cols * (10 - self.width) / 10 } else { 0 };
         let one = |p: &mut Pane| {
             p.wrap = false;
@@ -1084,14 +1087,14 @@ impl App {
             p.wrap = false;
             p
         });
-        self.line = Pane::new(1, rows.saturating_sub(n).max(1), cols, n, 231, 0);
-        one(&mut self.line);
+        self.input_panes(n);
         // Dark grey sets the status line apart from the answer pane above it.
         self.foot = Pane::new(1, rows, cols, 1, 252, 236);
         one(&mut self.foot);
         print!("{}", seq::HIDE);
         Crust::clear_screen();
         self.gap.iter_mut().for_each(Pane::refresh);
+        self.rule.refresh();
         self.fill_answer(false);
         self.fill_side();
         self.draw_line();
@@ -1169,7 +1172,7 @@ impl App {
     /// The prompt grew or shrank by a row: the panes above give or take it.
     /// They are drawn whole, since the prompt wrote over rows they had.
     fn reshape(&mut self, n: u16) {
-        let h = self.rows.saturating_sub(2 + n).max(1);
+        let h = self.rows.saturating_sub(3 + n).max(1);
         let at_end = !self.answer.moredown;
         self.answer.h = h;
         self.answer.invalidate();
@@ -1187,9 +1190,25 @@ impl App {
             gap.h = h;
             gap.full_refresh();
         }
-        self.line = Pane::new(1, self.rows.saturating_sub(n).max(1), self.bar.w, n, 231, 0);
-        self.line.wrap = false;
-        self.line.scroll = false;
+        self.input_panes(n);
+        self.rule.refresh();
+    }
+
+    /// The prompt's rows and a thin line above them, on the answer pane's
+    /// colour, so the prompt sits with the answers instead of in a strip.
+    fn input_panes(&mut self, n: u16) {
+        let cols = self.bar.w;
+        let y = self.rows.saturating_sub(n).max(2);
+        self.rule = Pane::new(1, y - 1, cols, 1, 240, 0);
+        self.line = Pane::new(1, y, cols, n, 231, 0);
+        for p in [&mut self.rule, &mut self.line] {
+            p.wrap = false;
+            p.scroll = false;
+            if let Some(hex) = &self.colour {
+                p.set_bg_hex(hex);
+            }
+        }
+        self.rule.set_text(&"─".repeat(cols as usize));
     }
 
     fn draw_line(&mut self) {

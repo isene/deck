@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.11 (2026-10-27)
+
+- The prompt sits on the answer pane's colour under a thin line, instead
+  of in a black strip of its own. It takes one row more.
+
 ## 0.1.10 (2026-10-27)
 
 - Claude reads what a `!command` printed as soon as it ends, and answers
