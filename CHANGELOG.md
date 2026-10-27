@@ -10,6 +10,8 @@
 - Answer text is white. It was light grey, and a line with a coloured word
   turned white after that word.
 - The top bar has the same grey as the status line at the bottom.
+- Under gluon, the line above the prompt is light green while deck has the
+  keys, the colour gluon gives the frame of the box that has them.
 - A long prompt breaks between words, so a word moves whole to the next
   row; only a word longer than a row is cut.
 
