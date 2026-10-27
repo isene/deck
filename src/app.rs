@@ -389,7 +389,7 @@ impl App {
             away: false,
             rows: 0,
             bar: Pane::new(1, 1, 1, 1, 255, 234),
-            answer: Pane::new(1, 1, 1, 1, 252, 0),
+            answer: Pane::new(1, 1, 1, 1, 231, 0),
             side: None,
             gap: None,
             line: Pane::new(1, 1, 1, 1, 231, 0),
@@ -1101,7 +1101,7 @@ impl App {
         self.bar = Pane::new(1, top + 1, cols, 1, 255, 234);
         one(&mut self.bar);
         // One blank column keeps the answer's scroll mark off the log.
-        self.answer = Pane::new(1, top + 2, cols - sw - u16::from(sw > 0), h, 252, 0);
+        self.answer = Pane::new(1, top + 2, cols - sw - u16::from(sw > 0), h, 231, 0);
         if let Some(hex) = &self.colour {
             self.answer.set_bg_hex(hex);
         }

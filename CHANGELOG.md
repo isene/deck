@@ -7,6 +7,8 @@
 - Under gluon's Home tab, deck draws in the bottom half of the screen
   (`set_area`), and tells gluon when a popup or the editor drew over the
   rest (`take_overdraw`).
+- Answer text is white. It was light grey, and a line with a coloured word
+  turned white after that word.
 
 ## 0.1.11 (2026-10-27)
 
