@@ -231,7 +231,9 @@ pub fn last_in<'a>(lines: impl Iterator<Item = &'a str>) -> Last {
             }
             Some("assistant") => {
                 for b in m["content"].as_array().into_iter().flatten() {
-                    if let (Some(t), Some(turn)) = (b["text"].as_str().filter(|t| !t.trim().is_empty()), l.turns.last_mut()) {
+                    // Claude Code writes that line for a turn cut short.
+                    let said = b["text"].as_str().filter(|t| !t.trim().is_empty() && t.trim() != "No response requested.");
+                    if let (Some(t), Some(turn)) = (said, l.turns.last_mut()) {
                         turn.1 = t.trim().to_string();
                     }
                 }
@@ -316,9 +318,11 @@ mod tests {
             r#"{"type":"system","subtype":"compact_boundary"}"#,
             r#"{"type":"user","isCompactSummary":true,"message":{"content":"This session is being continued"}}"#,
             r#"{"type":"assistant","message":{"content":[{"type":"text","text":"two"}]}}"#,
+            r#"{"type":"user","message":{"content":"cut short"}}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"No response requested."}]}}"#,
         ];
         let l = last_in(lines.into_iter());
-        let turns = vec![("first".into(), "one".into()), ("second".into(), "two".into())];
+        let turns = vec![("first".into(), "one".into()), ("second".into(), "two".into()), ("cut short".into(), String::new())];
         assert_eq!(l, Last { turns, model: "claude-opus-5-5".into(), context: 100 });
     }
 }

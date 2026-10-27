@@ -22,6 +22,10 @@
   up to 3 s in a turn. Now Claude Code ends on its own after deck has gone,
   in its own process group so closing the window does not cut it off. A
   turn still running is stopped, as before.
+- C-D during a turn first says "Claude is working: C-D again stops the turn
+  and quits", since quitting cuts the turn. A reopened session marks a turn
+  that was cut with "✗ stopped"; before, its prompt stood with no answer
+  and the session looked stuck.
 - A session reopened after Claude Code compacted it showed the whole summary
   as the last prompt, in blue. deck now shows the prompt you typed.
 - A prompt sent while Claude works shows at once under the running turn,

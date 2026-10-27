@@ -48,7 +48,7 @@ const KEYS: &[(&str, &str)] = &[
     ("C-B", "pick the answer pane's colour (prism)"),
     ("C-L", "draw the screen again"),
     ("C-?", "this help"),
-    ("C-D", "quit"),
+    ("C-D", "quit; during a turn, press it twice"),
 ];
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -59,6 +59,8 @@ const GREEN: u8 = 78;
 const RED: u8 = 203;
 const AMBER: u8 = 214;
 const WAIT: u8 = 141;
+/// C-D during a turn shows this first; a second C-D stops the turn and quits.
+const QUIT_WARN: &str = "Claude is working: C-D again stops the turn and quits";
 
 struct Tool {
     id: String,
@@ -282,7 +284,9 @@ impl App {
             foot: Pane::new(1, 1, 1, 1, 252, 0),
         };
         for (prompt, answer) in last.turns {
-            app.turns.push(Turn { prompt: prompt.clone(), answer: Some(answer), failed: false, log_at: app.log.len(), drawn: None });
+            // A prompt with no answer had its turn cut short.
+            let failed = answer.is_empty();
+            app.turns.push(Turn { prompt: prompt.clone(), answer: Some(answer), failed, log_at: app.log.len(), drawn: None });
             app.log.push(Line::Prompt(prompt));
         }
         app
@@ -572,7 +576,12 @@ impl App {
 
     /// True when the user quits.
     fn key(&mut self, k: &str) -> bool {
+        let armed = self.flash.as_deref() == Some(QUIT_WARN);
         self.flash = None;
+        if k == "C-D" && self.busy.is_some() && !armed {
+            self.flash = Some(QUIT_WARN.into());
+            return false;
+        }
         if let Some((id, _, input)) = self.asks.front().cloned() {
             match k {
                 "y" | "Y" | "n" | "N" | "ESC" => {
