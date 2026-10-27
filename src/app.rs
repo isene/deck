@@ -32,7 +32,7 @@ const KEYS: &[(&str, &str)] = &[
     ("S-Enter, C-J", "a new line in the prompt; so does \\ before Enter"),
     ("Esc", "stop the turn Claude is on"),
     ("Up, Down", "the row above or below, else earlier prompts"),
-    ("! command", "run it in a shell; Claude gets what it printed with the next prompt"),
+    ("! command", "run it in a shell; Claude reads what it printed and answers"),
     ("C-A, C-E", "to the start or end of the prompt"),
     ("C-U, C-K", "delete to the start or end of the prompt"),
     ("C-Backspace", "delete a word"),
@@ -127,8 +127,6 @@ pub struct App {
     back: usize,
     /// What was typed before Up went back through the history.
     draft: String,
-    /// What `!` commands printed, for Claude with the next prompt.
-    shell_out: String,
     detail: bool,
     /// The answer pane's share of the screen, in tenths (5 to 9).
     width: u16,
@@ -347,7 +345,6 @@ impl App {
             at: 0,
             back: history.len(),
             history,
-            shell_out: String::new(),
             draft: String::new(),
             detail: false,
             flash: None,
@@ -364,8 +361,8 @@ impl App {
             foot: Pane::new(1, 1, 1, 1, 252, 0),
         };
         for (prompt, answer) in last.turns {
-            // A prompt with no answer had its turn cut short.
-            let failed = answer.is_empty();
+            // A prompt with no answer had its turn cut short; a ! command needs none.
+            let failed = answer.is_empty() && !prompt.starts_with("! ");
             app.turns.push(Turn { prompt: prompt.clone(), answer: Some(answer), failed, log_at: app.log.len(), drawn: None });
             app.log.push(Line::Prompt(prompt));
         }
@@ -616,9 +613,8 @@ impl App {
     }
 
     fn send(&mut self, text: String) {
-        let out = std::mem::take(&mut self.shell_out);
         let seen = std::mem::take(&mut self.seen);
-        self.claude.say(&format!("{seen}{out}{text}"));
+        self.claude.say(&format!("{seen}{text}"));
         self.start(text);
     }
 
@@ -637,8 +633,11 @@ impl App {
 
     /// A new turn on screen, for a prompt Claude has.
     fn start(&mut self, text: String) {
-        self.turns.push(Turn { prompt: text.clone(), answer: None, failed: false, log_at: self.log.len(), drawn: None });
-        self.log.push(Line::Prompt(text));
+        // A turn with no prompt answers a ! command, whose turn shows it.
+        if !text.is_empty() {
+            self.log.push(Line::Prompt(text.clone()));
+        }
+        self.turns.push(Turn { prompt: text, answer: None, failed: false, log_at: self.log.len(), drawn: None });
         self.busy = Some(Instant::now());
         self.step = Instant::now();
         self.detail = false;
@@ -1027,7 +1026,7 @@ impl App {
         let out = typescript(&fs::read_to_string(&log).unwrap_or_default());
         let _ = fs::remove_file(&log);
         let tail: String = out.chars().rev().take(30_000).collect::<Vec<_>>().into_iter().rev().collect();
-        self.shell_out += &format!("<bash-input>{cmd}</bash-input>\n<bash-stdout>{tail}</bash-stdout>\n");
+        let said = format!("<bash-input>{cmd}</bash-input>\n<bash-stdout>{tail}</bash-stdout>\n");
         let failed = code.is_some_and(|c| c != 0);
         let mut answer = format!("```\n{out}\n```");
         if let Some(c) = code.filter(|_| failed) {
@@ -1036,6 +1035,11 @@ impl App {
         let prompt = format!("! {cmd}");
         self.turns.push(Turn { prompt: prompt.clone(), answer: Some(answer), failed, log_at: self.log.len(), drawn: None });
         self.log.push(Line::Prompt(prompt));
+        // Claude reads what it printed at once, and answers.
+        if self.ended.is_none() {
+            self.claude.say(&said);
+            self.start(String::new());
+        }
         self.layout();
     }
 
@@ -1380,6 +1384,9 @@ fn turn_text(t: &mut Turn, width: usize) -> String {
         Some(a) if a.trim().is_empty() && t.failed => style::fg("✗ stopped", RED),
         Some(_) => drawn(t, width),
     };
+    if prompt.is_empty() {
+        return body;
+    }
     format!("{}\n\n{}", prompt.join("\n"), body)
 }
 

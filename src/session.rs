@@ -231,7 +231,15 @@ pub fn last_in<'a>(lines: impl Iterator<Item = &'a str>) -> Last {
                         .join("\n"),
                     _ => continue,
                 };
-                let t = text.trim();
+                // A ! command, sent alone or, before 0.1.9, ahead of a prompt.
+                let t = match text.trim().strip_prefix("<bash-input>") {
+                    Some(rest) => match rest.rsplit_once("</bash-stdout>").map_or("", |(_, p)| p.trim()) {
+                        "" => format!("! {}", rest.split("</bash-input>").next().unwrap_or("")),
+                        p => p.to_string(),
+                    },
+                    None => text.trim().to_string(),
+                };
+                let t = t.as_str();
                 if t.is_empty() || t.starts_with('<') || t.starts_with('[') || t.starts_with("Stop hook feedback") {
                     continue;
                 }
@@ -328,10 +336,13 @@ mod tests {
             r#"{"type":"user","isCompactSummary":true,"message":{"content":"This session is being continued"}}"#,
             r#"{"type":"assistant","message":{"content":[{"type":"text","text":"two"}]}}"#,
             r#"{"type":"user","message":{"content":"cut short"}}"#,
+            r#"{"type":"user","message":{"content":"<bash-input>ls</bash-input>\n<bash-stdout>a b</bash-stdout>\n"}}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Two files."}]}}"#,
+            r#"{"type":"user","message":{"content":"<bash-input>pwd</bash-input>\n<bash-stdout>/x</bash-stdout>\nAnd now?"}}"#,
             r#"{"type":"assistant","message":{"content":[{"type":"text","text":"No response requested."}]}}"#,
         ];
         let l = last_in(lines.into_iter());
-        let turns = vec![("first".into(), "one".into()), ("second\nand this".into(), "two".into()), ("cut short".into(), String::new())];
+        let turns = vec![("first".into(), "one".into()), ("second\nand this".into(), "two".into()), ("cut short".into(), String::new()), ("! ls".into(), "Two files.".into()), ("And now?".into(), String::new())];
         assert_eq!(l, Last { turns, model: "claude-opus-5-5".into(), context: 100 });
     }
 }

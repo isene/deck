@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.10 (2026-10-27)
+
+- Claude reads what a `!command` printed as soon as it ends, and answers
+  it, so a script run in deck gets a reply. Before, the output waited for
+  the next prompt. A reopened session shows such a turn as `! command`.
+
 ## 0.1.9 (2026-10-27)
 
 - C-Enter sends the purple prompts at once instead of after the turn. They

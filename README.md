@@ -49,7 +49,7 @@ deck <id>         open the session with this id
 | C-Enter | send the purple messages now; they turn blue when Claude reads them |
 | S-Enter, C-J, \\ Enter | a new line in the prompt |
 | Up, Down | the row above or below, else earlier prompts, also from past runs |
-| !command | run it in a shell; Claude gets what it printed with the next prompt |
+| !command | run it in a shell; Claude reads what it printed and answers |
 | Esc | stop the turn Claude is on |
 | PgUp, PgDn | scroll the answers |
 | C-F | find in the answers; C-F then Enter finds the next |
