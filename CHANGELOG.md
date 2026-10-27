@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.9 (2026-10-27)
+
+- C-Enter sends the purple prompts at once instead of after the turn. They
+  turn blue when Claude reads them: at its next tool call, inside the turn
+  it is on, or as the next turn if it was already writing its answer.
+  deck asks Claude Code to echo each prompt it reads
+  (`--replay-user-messages`), one short line per prompt.
+- A reopened session shows such a prompt under the one it joined.
+- Needs crust 0.1.69, which reads Ctrl+Enter as C-ENTER.
+
 ## 0.1.8 (2026-10-27)
 
 - Up and Down reach the prompts of earlier runs in this folder, from deck

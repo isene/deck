@@ -28,6 +28,7 @@ Keys:
 /// The keys, for `deck --help` and the C-? popup.
 const KEYS: &[(&str, &str)] = &[
     ("Enter", "send (while Claude works, it waits its turn, in purple)"),
+    ("C-Enter", "send the purple prompts now; blue once Claude reads them"),
     ("S-Enter, C-J", "a new line in the prompt; so does \\ before Enter"),
     ("Esc", "stop the turn Claude is on"),
     ("Up, Down", "the row above or below, else earlier prompts"),
@@ -111,6 +112,8 @@ pub struct App {
     turns: Vec<Turn>,
     log: Vec<Line>,
     waiting: VecDeque<String>,
+    /// Prompts sent mid-turn with C-Enter that Claude has not read yet.
+    pushed: VecDeque<String>,
     asks: VecDeque<(String, String, Value)>,
     busy: Option<Instant>,
     ended: Option<String>,
@@ -301,7 +304,7 @@ impl App {
     /// the next prompt, and a line in the log says so.
     pub fn attach(&mut self, what: &str, text: &str) {
         self.seen = format!("<on-screen app=\"{what}\">\n{text}\n</on-screen>\n");
-        self.log.push(Line::Note(format!("{what} on screen goes with the next prompt")));
+        self.log.push(Line::Note(format!("{what} screen attached")));
         self.fill_side();
     }
 
@@ -331,6 +334,7 @@ impl App {
             turns: Vec::new(),
             log: Vec::new(),
             waiting: VecDeque::new(),
+            pushed: VecDeque::new(),
             asks: VecDeque::new(),
             busy: None,
             ended: None,
@@ -413,6 +417,23 @@ impl App {
                     self.log.push(Line::Stopped);
                     log = true;
                 }
+                // Only a prompt sent with C-Enter; the rest turned blue when sent.
+                Event::Taken(text) if self.pushed.front().is_some_and(|p| p.trim() == text.trim()) => {
+                    let text = self.pushed.pop_front().unwrap_or(text);
+                    match self.turns.last_mut() {
+                        // Read inside the running turn, whose answer covers both.
+                        Some(t) if t.answer.is_none() => {
+                            t.prompt = format!("{}\n{text}", t.prompt);
+                            self.log.push(Line::Prompt(text));
+                        }
+                        // The turn had ended, so the prompt runs as the next one.
+                        _ => self.start(text),
+                    }
+                    answer = true;
+                    log = true;
+                    status = true;
+                }
+                Event::Taken(_) => {}
                 Event::Context(n) => self.context = n,
                 Event::Limits { hours, week, week_reset } => self.limits = Some((hours, week, week_reset)),
                 Event::Ask { id, tool, input } => {
@@ -445,12 +466,15 @@ impl App {
                         t.failed = failed;
                         t.drawn = None;
                     }
-                    self.busy = None;
                     answer = true;
                     log = true;
                     status = true;
-                    if let Some(next) = self.waiting.pop_front() {
-                        self.send(next);
+                    // Prompts sent with C-Enter run next; the purple ones wait for them.
+                    if self.pushed.is_empty() {
+                        self.busy = None;
+                        if let Some(next) = self.waiting.pop_front() {
+                            self.send(next);
+                        }
                     }
                 }
                 Event::Status(s) => {
@@ -463,6 +487,7 @@ impl App {
                     self.ended = Some(tail.into_iter().rev().collect::<Vec<_>>().join("\n"));
                     self.busy = None;
                     self.asks.clear();
+                    self.pushed.clear();
                     self.log.push(Line::Ended);
                     answer = true;
                     log = true;
@@ -585,11 +610,29 @@ impl App {
     }
 
     fn send(&mut self, text: String) {
-        self.turns.push(Turn { prompt: text.clone(), answer: None, failed: false, log_at: self.log.len(), drawn: None });
-        self.log.push(Line::Prompt(text.clone()));
         let out = std::mem::take(&mut self.shell_out);
         let seen = std::mem::take(&mut self.seen);
         self.claude.say(&format!("{seen}{out}{text}"));
+        self.start(text);
+    }
+
+    /// C-Enter: the purple prompts go to Claude now. It reads them at its
+    /// next tool call, or runs them as the next turn.
+    fn push(&mut self) {
+        self.enter();
+        if self.busy.is_none() {
+            return;
+        }
+        while let Some(text) = self.waiting.pop_front() {
+            self.claude.say(&text);
+            self.pushed.push_back(text);
+        }
+    }
+
+    /// A new turn on screen, for a prompt Claude has.
+    fn start(&mut self, text: String) {
+        self.turns.push(Turn { prompt: text.clone(), answer: None, failed: false, log_at: self.log.len(), drawn: None });
+        self.log.push(Line::Prompt(text));
         self.busy = Some(Instant::now());
         self.detail = false;
         self.fill_answer(true);
@@ -671,6 +714,7 @@ impl App {
         }
         match k {
             "ENTER" => self.enter(),
+            "C-ENTER" => self.push(),
             "ESC" | "C-C" if self.busy.is_some() => self.claude.interrupt(),
             "C-C" => self.set_input(""),
             "C-D" => return true,
@@ -1047,8 +1091,9 @@ impl App {
             let start = self.turns.last().map_or(0, |t| t.log_at);
             let tools = self.log[start..].iter().filter(|l| matches!(l, Line::Tool(_))).count();
             let mut st = format!("● working {}:{:02} · {} tool{}", s / 60, s % 60, tools, if tools == 1 { "" } else { "s" });
-            if !self.waiting.is_empty() {
-                st += &format!(" · {} waiting", self.waiting.len());
+            let waiting = self.waiting.len() + self.pushed.len();
+            if waiting > 0 {
+                st += &format!(" · {waiting} waiting");
             }
             style::fg(&st, AMBER) + &style::dim("   Esc stops")
         } else {
@@ -1185,8 +1230,8 @@ impl App {
                 None => {}
             }
             let mut latest = blocks.pop().unwrap_or_default();
-            if !self.waiting.is_empty() {
-                latest += &format!("\n\n{}", waiting_text(&self.waiting));
+            if !self.waiting.is_empty() || !self.pushed.is_empty() {
+                latest += &format!("\n\n{}", waiting_text(self.pushed.iter().chain(&self.waiting)));
             }
             (blocks.join("\n\n"), latest)
         };
@@ -1325,8 +1370,8 @@ fn turn_text(t: &mut Turn, width: usize) -> String {
 }
 
 /// Prompts sent while Claude works, in their own colour until they go.
-fn waiting_text(waiting: &VecDeque<String>) -> String {
-    let lines: Vec<String> = waiting.iter().flat_map(|p| p.lines()).map(|l| style::fg(&format!("› {l}"), WAIT)).collect();
+fn waiting_text<'a>(waiting: impl Iterator<Item = &'a String>) -> String {
+    let lines: Vec<String> = waiting.flat_map(|p| p.lines()).map(|l| style::fg(&format!("› {l}"), WAIT)).collect();
     lines.join("\n")
 }
 
@@ -1512,7 +1557,7 @@ mod tests {
 
     #[test]
     fn a_waiting_prompt_is_drawn() {
-        let text = crust::strip_ansi(&waiting_text(&VecDeque::from(["one\ntwo".to_string(), "three".to_string()])));
+        let text = crust::strip_ansi(&waiting_text(["one\ntwo".to_string(), "three".to_string()].iter()));
         assert_eq!(text, "› one\n› two\n› three");
     }
 

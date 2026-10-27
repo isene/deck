@@ -203,7 +203,8 @@ pub fn last_in<'a>(lines: impl Iterator<Item = &'a str>) -> Last {
         let has = |k: &str| line.contains(k);
         let prompt = has(r#""type":"user""#) && !has(r#""type":"tool_result""#);
         let answer = has(r#""type":"assistant""#) && has(r#""type":"text""#);
-        if !(prompt || answer) {
+        let queued = has(r#""type":"queued_command""#);
+        if !(prompt || answer || queued) {
             continue;
         }
         let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
@@ -213,6 +214,13 @@ pub fn last_in<'a>(lines: impl Iterator<Item = &'a str>) -> Last {
         }
         let m = &v["message"];
         match v["type"].as_str() {
+            // A prompt Claude read in the middle of a turn joins that turn.
+            Some("attachment") => {
+                let p = v["attachment"]["prompt"].as_str().filter(|_| v["attachment"]["type"] == "queued_command");
+                if let (Some(p), Some(turn)) = (p, l.turns.last_mut()) {
+                    turn.0 = format!("{}\n{}", turn.0, p.trim());
+                }
+            }
             Some("user") => {
                 let text = match &m["content"] {
                     Value::String(s) => s.clone(),
@@ -313,6 +321,7 @@ mod tests {
             r#"{"type":"user","message":{"content":"second"}}"#,
             r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash"}]}}"#,
             r#"{"type":"user","message":{"content":[{"type":"tool_result","content":"ok"}]}}"#,
+            r#"{"type":"attachment","attachment":{"type":"queued_command","prompt":"and this"}}"#,
             r#"{"type":"user","isMeta":true,"message":{"content":"meta"}}"#,
             r#"{"type":"user","message":{"content":[{"type":"text","text":"Stop hook feedback: too long"}]}}"#,
             r#"{"type":"system","subtype":"compact_boundary"}"#,
@@ -322,7 +331,7 @@ mod tests {
             r#"{"type":"assistant","message":{"content":[{"type":"text","text":"No response requested."}]}}"#,
         ];
         let l = last_in(lines.into_iter());
-        let turns = vec![("first".into(), "one".into()), ("second".into(), "two".into()), ("cut short".into(), String::new())];
+        let turns = vec![("first".into(), "one".into()), ("second\nand this".into(), "two".into()), ("cut short".into(), String::new())];
         assert_eq!(l, Last { turns, model: "claude-opus-5-5".into(), context: 100 });
     }
 }

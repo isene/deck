@@ -34,6 +34,8 @@ pub enum Event {
     /// A stop hook sent the answer back; its first line of complaint.
     Rewrite(String),
     Stopped,
+    /// Claude Code took in this prompt (it echoes each one when it reads it).
+    Taken(String),
     /// Context in use after the last call to the model, in tokens.
     Context(u64),
     /// Claude Code asks whether a tool may run.
@@ -90,6 +92,11 @@ pub fn read(v: &Value) -> Vec<Event> {
                 .sum::<u64>();
             if used > 0 {
                 out.push(Event::Context(used));
+            }
+        }
+        "user" if v["isReplay"] == true => {
+            if let Some(t) = v["message"]["content"].as_str() {
+                out.push(Event::Taken(t.to_string()));
             }
         }
         "user" => {
@@ -221,6 +228,8 @@ impl Claude {
         let program = std::env::var("DECK_CLAUDE").unwrap_or_else(|_| "claude".into());
         let mut cmd = Command::new(program);
         cmd.args(["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"]);
+        // An echo of each prompt when Claude reads it, for prompts sent mid-turn.
+        cmd.arg("--replay-user-messages");
         // Permission questions come to deck instead of being refused.
         cmd.args(["--permission-prompts", "host"]);
         cmd.args([if resume { "--resume" } else { "--session-id" }, id]);
@@ -336,6 +345,8 @@ mod tests {
 
     #[test]
     fn an_interrupt_ends_the_turn_as_failed() {
+        assert_eq!(ev(r#"{"type":"user","isReplay":true,"message":{"role":"user","content":"Also this."}}"#),
+            vec![Event::Taken("Also this.".into())]);
         assert_eq!(ev(r#"{"type":"user","message":{"content":[{"type":"text","text":"[Request interrupted by user]"}]}}"#),
             vec![Event::Stopped]);
         let end = ev(r#"{"type":"result","subtype":"error_during_execution","is_error":false}"#);
