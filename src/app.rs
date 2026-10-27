@@ -243,7 +243,7 @@ fn name(s: &session::Session) -> String {
     }
 }
 
-/// The window's title: "Deck #pf".
+/// The window's title: "Deck #notes".
 fn title(s: &session::Session) -> String {
     format!("Deck {}", name(s))
 }

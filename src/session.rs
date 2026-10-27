@@ -271,21 +271,21 @@ mod tests {
 
     #[test]
     fn the_colour_comes_from_the_sessions_tag() {
-        let rc = "# fleet\nsession asm 2 00101a\nsession pf 5 280028\nsession sOS -\n";
-        assert_eq!(colour_in(rc, &["pf".into()]).as_deref(), Some("280028"));
-        assert_eq!(colour_in(rc, &["sOS".into()]), None);
+        let rc = "# fleet\nsession web 2 00101a\nsession notes 5 280028\nsession docs -\n";
+        assert_eq!(colour_in(rc, &["notes".into()]).as_deref(), Some("280028"));
+        assert_eq!(colour_in(rc, &["docs".into()]), None);
         assert_eq!(colour_in(rc, &[]), None);
     }
 
     #[test]
     fn a_picked_colour_goes_on_the_line_that_is_read() {
-        let rc = "session asm 2 00101a\nsession pf 5 280028\nsession sOS -\n";
+        let rc = "session web 2 00101a\nsession notes 5 280028\nsession docs -\n";
         let set = |tags: &[&str], hex| with_colour(rc, &tags.iter().map(|t| t.to_string()).collect::<Vec<_>>(), hex);
-        assert_eq!(set(&["pf"], "112233"), "session asm 2 00101a\nsession pf 5 112233\nsession sOS -\n");
-        assert_eq!(set(&["sOS"], "112233"), "session asm 2 00101a\nsession pf 5 280028\nsession sOS - 112233\n");
+        assert_eq!(set(&["notes"], "112233"), "session web 2 00101a\nsession notes 5 112233\nsession docs -\n");
+        assert_eq!(set(&["docs"], "112233"), "session web 2 00101a\nsession notes 5 280028\nsession docs - 112233\n");
         assert_eq!(set(&["new"], "112233"), format!("{rc}session new - 112233\n"));
-        let after = set(&["x", "pf"], "445566");
-        assert_eq!(colour_in(&after, &["x".into(), "pf".into()]).as_deref(), Some("445566"));
+        let after = set(&["x", "notes"], "445566");
+        assert_eq!(colour_in(&after, &["x".into(), "notes".into()]).as_deref(), Some("445566"));
     }
 
     #[test]
