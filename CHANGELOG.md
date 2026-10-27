@@ -9,6 +9,7 @@
   rest (`take_overdraw`).
 - Answer text is white. It was light grey, and a line with a coloured word
   turned white after that word.
+- The top bar has the same grey as the status line at the bottom.
 
 ## 0.1.11 (2026-10-27)
 

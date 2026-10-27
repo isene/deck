@@ -400,7 +400,7 @@ impl App {
             found: String::new(),
             away: false,
             rows: 0,
-            bar: Pane::new(1, 1, 1, 1, 255, 234),
+            bar: Pane::new(1, 1, 1, 1, 255, 236),
             answer: Pane::new(1, 1, 1, 1, 231, 0),
             side: None,
             gap: None,
@@ -1110,7 +1110,7 @@ impl App {
             p.wrap = false;
             p.scroll = false;
         };
-        self.bar = Pane::new(1, top + 1, cols, 1, 255, 234);
+        self.bar = Pane::new(1, top + 1, cols, 1, 255, 236);
         one(&mut self.bar);
         // One blank column keeps the answer's scroll mark off the log.
         self.answer = Pane::new(1, top + 2, cols - sw - u16::from(sw > 0), h, 231, 0);
