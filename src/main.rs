@@ -393,7 +393,7 @@ impl App {
             }
         }
         if answer {
-            self.fill_answer(true);
+            self.fill_answer(false);
         }
         if log {
             self.fill_side();
@@ -946,7 +946,7 @@ impl App {
         print!("{}", seq::HIDE);
         Crust::clear_screen();
         self.gap.iter_mut().for_each(Pane::refresh);
-        self.fill_answer(true);
+        self.fill_answer(false);
         self.fill_side();
         self.draw_line();
         self.draw_foot();
@@ -1073,8 +1073,10 @@ impl App {
         let _ = std::io::stdout().flush();
     }
 
-    /// The answers, oldest first; `jump` scrolls to the latest one's top.
-    fn fill_answer(&mut self, jump: bool) {
+    /// The answers, oldest first. The pane follows the end, as a terminal
+    /// does, unless it was scrolled up to read; `end` sends it there anyway.
+    fn fill_answer(&mut self, end: bool) {
+        let at_end = end || !self.answer.moredown;
         let width = (self.answer.w as usize).saturating_sub(2);
         let (before, latest) = if self.detail {
             (String::new(), self.detail_text())
@@ -1096,16 +1098,15 @@ impl App {
             if !self.waiting.is_empty() {
                 latest += &format!("\n\n{}", waiting_text(&self.waiting));
             }
-            (blocks.join("\n"), latest)
+            (blocks.join("\n\n"), latest)
         };
-        if jump {
-            self.answer.set_text(&before);
-            let n = if before.is_empty() { 0 } else { self.answer.visual_line_count() + 1 };
-            self.answer.ix = n;
-        }
         let all = if before.is_empty() { latest } else { format!("{before}\n\n{latest}") };
         self.answer.set_text(&all);
-        self.answer.refresh();
+        if at_end {
+            self.answer.bottom();
+        } else {
+            self.answer.refresh();
+        }
     }
 
     fn fill_side(&mut self) {

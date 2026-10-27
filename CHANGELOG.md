@@ -9,6 +9,9 @@
   the terminal handed over. Claude gets what it printed with the next
   prompt, as in Claude Code.
 - Up then Down brings back what you had typed but not sent.
+- The answer pane follows its end, as a terminal does, so the answer before
+  stays in view under a new prompt. Scrolled up to read, it stays put.
+  Before, each new prompt jumped to the top of the pane.
 - A session reopened after Claude Code compacted it showed the whole summary
   as the last prompt, in blue. deck now shows the prompt you typed.
 - A prompt sent while Claude works shows at once under the running turn,
