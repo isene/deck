@@ -372,11 +372,9 @@ impl App {
     }
 
     /// Under gluon: what the tab before had on screen. Claude gets it with
-    /// the next prompt, and a line in the log says so.
+    /// the next prompt.
     pub fn attach(&mut self, what: &str, text: &str) {
         self.seen = format!("<on-screen app=\"{what}\">\n{text}\n</on-screen>\n");
-        self.log.push(Line::Note(format!("{what} screen attached")));
-        self.fill_side();
     }
 
     /// A prompt from the app around deck (gluon's Ctrl+S), as if typed and

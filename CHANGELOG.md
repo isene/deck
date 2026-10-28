@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.21 (2026-10-28)
+
+- Under gluon, deck no longer writes "<app> screen attached" in the
+  tool log at each tab switch; five or six piled up. The screen still
+  goes to Claude with the next prompt.
+
 ## 0.1.20 (2026-10-28)
 
 - C-D asks "stop it and quit? y/n" while Claude works or a command of
