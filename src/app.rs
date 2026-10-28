@@ -281,9 +281,11 @@ impl App {
     /// While Claude works the bar shows the time, so it wakes once a
     /// second; otherwise it sleeps until a key, until Claude's output
     /// arrives (the reader then sends SIGWINCH, read as "RESIZE"), or
-    /// once to pause an idle Claude.
+    /// once to pause an idle Claude. Hidden under gluon, the bar is not on
+    /// screen, so Claude's output alone wakes it while it works.
     pub fn before_wait(&self) -> u64 {
         match (self.busy, self.quiet) {
+            (Some(_), _) if self.hidden => 86400,
             (Some(_), _) => 1,
             (None, Some(t)) => self.park.saturating_sub(t.elapsed()).as_secs().max(1),
             (None, None) => 86400,

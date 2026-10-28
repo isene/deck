@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.18 (2026-10-28)
+
+- Hidden under gluon (another tab in front), deck drops its 1 s clock
+  while Claude works, since its bar is not on screen. gluon now asks deck
+  for its wait on every tab, so an idle Claude is paused there too.
+
 ## 0.1.17 (2026-10-28)
 
 - `App::ask` sends a prompt from the app deck runs in, as if typed and
