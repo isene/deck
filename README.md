@@ -65,7 +65,7 @@ deck <id>         open the session with this id
 | C-? | the keys in a popup |
 | y, n | answer a permission question |
 | C-L | draw the screen again |
-| C-D | quit; during a turn, press it twice |
+| C-D | quit; asks y/n first while Claude or a command of its runs |
 
 deck refuses a session that is open in Claude Code already. For what deck
 lacks (slash command dialogs, plan mode, questions with choices), quit and

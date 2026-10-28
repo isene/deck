@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.20 (2026-10-28)
+
+- C-D asks "stop it and quit? y/n" while Claude works or a command of
+  its runs, a background job too; y or C-D again quits. Before, an idle
+  Claude with a background job quit at once and went on alone, with no
+  window, until the job ended and it had answered.
+- Quitting stops Claude's commands along with it.
+
 ## 0.1.19 (2026-10-28)
 
 - A `!` command's output shows only its last 12 lines in the answer

@@ -319,11 +319,17 @@ impl Claude {
         }
     }
 
-    fn has_children(&self) -> bool {
+    /// True while it runs a command, in a turn or in the background.
+    pub fn has_children(&self) -> bool {
+        !self.children().is_empty()
+    }
+
+    /// The process ids of the commands it runs.
+    fn children(&self) -> Vec<i32> {
         let tasks = std::fs::read_dir(format!("/proc/{}/task", self.child.id()));
-        tasks.into_iter().flatten().flatten().any(|t| {
-            std::fs::read_to_string(t.path().join("children")).is_ok_and(|c| !c.trim().is_empty())
-        })
+        let lists = tasks.into_iter().flatten().flatten();
+        let lists = lists.filter_map(|t| std::fs::read_to_string(t.path().join("children")).ok());
+        lists.flat_map(|c| c.split_whitespace().filter_map(|p| p.parse().ok()).collect::<Vec<_>>()).collect()
     }
 
     fn send(&mut self, v: Value) {
@@ -355,11 +361,22 @@ impl Claude {
     }
 
     /// Close its input, so it ends on its own; that takes it most of a
-    /// second, which deck does not wait for. A turn still running is cut.
+    /// second, which deck does not wait for. A turn still running is cut,
+    /// and so are its commands, which it would otherwise wait for with
+    /// no window to answer in.
     pub fn stop(&mut self, busy: bool) {
         self.go_on();
         self.stdin = None;
-        if busy {
+        let jobs = self.children();
+        if busy || !jobs.is_empty() {
+            // Claude Code starts each command in a group of its own.
+            for p in jobs {
+                unsafe {
+                    if libc::kill(-p, libc::SIGTERM) != 0 {
+                        libc::kill(p, libc::SIGTERM);
+                    }
+                }
+            }
             let _ = self.child.kill();
             let _ = self.child.wait();
         }
@@ -463,10 +480,19 @@ mod tests {
         idle.say("hi");
         assert_ne!(state(&idle), 'T');
         idle.stop(true);
-        let mut working = start("sleep 30 & exec sleep 30");
+        // One command in a group of its own, as Claude Code starts them,
+        // and one in its group.
+        let mut working = start("setsid sleep 30 & sleep 30 & exec sleep 30");
         assert!(!working.pause());
         assert_ne!(state(&working), 'T');
-        working.stop(true);
+        let jobs = working.children();
+        assert_eq!(jobs.len(), 2);
+        working.stop(false);
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        for p in jobs {
+            let st = std::fs::read_to_string(format!("/proc/{p}/stat")).unwrap_or_default();
+            assert!(st.is_empty() || st.contains(") Z"), "{p} still runs: {st}");
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 

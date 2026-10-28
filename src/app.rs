@@ -47,7 +47,7 @@ const KEYS: &[(&str, &str)] = &[
     ("C-B", "pick the answer pane's colour (prism)"),
     ("C-L", "draw the screen again"),
     ("C-?", "this help"),
-    ("C-D", "quit; during a turn, press it twice"),
+    ("C-D", "quit; asks y/n first while Claude or a command of its runs"),
 ];
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -61,7 +61,7 @@ const RED: u8 = 203;
 const AMBER: u8 = 214;
 const WAIT: u8 = 141;
 /// C-D during a turn shows this first; a second C-D stops the turn and quits.
-const QUIT_WARN: &str = "Claude is working: C-D again stops the turn and quits";
+const QUIT_WARN: &str = "Claude is still at work: stop it and quit? y/n";
 
 struct Tool {
     id: String,
@@ -808,7 +808,12 @@ impl App {
     fn key(&mut self, k: &str) -> bool {
         let armed = self.flash.as_deref() == Some(QUIT_WARN);
         self.flash = None;
-        if k == "C-D" && self.busy.is_some() && !armed {
+        // The question before quitting takes the next key: y, or C-D
+        // again, quits; any other key stays.
+        if armed {
+            return matches!(k, "y" | "Y" | "C-D");
+        }
+        if k == "C-D" && (self.busy.is_some() || self.claude.has_children()) {
             self.flash = Some(QUIT_WARN.into());
             return false;
         }
