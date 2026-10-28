@@ -1137,7 +1137,7 @@ impl App {
         let tail: String = out.chars().rev().take(30_000).collect::<Vec<_>>().into_iter().rev().collect();
         let said = format!("<bash-input>{cmd}</bash-input>\n<bash-stdout>{tail}</bash-stdout>\n");
         let failed = code.is_some_and(|c| c != 0);
-        let mut answer = format!("```\n{out}\n```");
+        let mut answer = format!("```\n{}\n```", last_lines(&out, SHOWN));
         if let Some(c) = code.filter(|_| failed) {
             answer += &format!("\nexit {c}");
         }
@@ -1615,6 +1615,19 @@ fn history_in(text: &str, project: &str) -> Vec<String> {
     out.split_off(skip)
 }
 
+/// How many lines of a ! command's output the answer pane shows: the
+/// last ones. The terminal printed them all, and Claude gets them all.
+const SHOWN: usize = 12;
+
+/// The last `n` lines of `out`, after a line that counts the ones before.
+fn last_lines(out: &str, n: usize) -> String {
+    let lines: Vec<&str> = out.lines().collect();
+    match lines.len().saturating_sub(n) {
+        0 => out.to_string(),
+        cut => format!("… {cut} lines before these\n{}", lines[cut..].join("\n")),
+    }
+}
+
 /// What a command printed, from the log `script` keeps: its first and
 /// last lines are script's own, a carriage return starts the line over,
 /// and colour codes go.
@@ -1734,6 +1747,13 @@ fn hyperlist(md: &str, width: usize) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_long_command_output_shows_its_last_lines() {
+        assert_eq!(last_lines("a\nb", 3), "a\nb");
+        assert_eq!(last_lines("a\nb\nc", 3), "a\nb\nc");
+        assert_eq!(last_lines("a\nb\nc\nd\ne", 3), "… 2 lines before these\nc\nd\ne");
+    }
 
     #[test]
     fn the_log_shows_every_line_of_a_prompt() {

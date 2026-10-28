@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.19 (2026-10-28)
+
+- A `!` command's output shows only its last 12 lines in the answer
+  pane, under a line that counts the rest. The terminal printed all of
+  it while it ran, and Claude still gets all of it.
+
 ## 0.1.18 (2026-10-28)
 
 - Hidden under gluon (another tab in front), deck drops its 1 s clock
