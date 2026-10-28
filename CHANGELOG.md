@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.24 (2026-10-28)
+
+- The top bar shows the session's open ETA, as fleet's ETA column does:
+  "○ ready · ETA 16:30", and red once that time has passed. deck reads
+  fleet's mark in ~/.fleet/eta/<session id> at the start and at the end
+  of each turn: one small file read per turn, nothing while idle.
+
 ## 0.1.23 (2026-10-28)
 
 - A message sent with C-Enter during a turn turns blue at once, since

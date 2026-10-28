@@ -22,6 +22,9 @@ user@host ~/src/myproject [Opus 5.5 high] [12%] ...
   ✗ when it failed. C-O shows the last turn's calls with their output.
 - When a stop hook sends an answer back, you see only the rewrite, and one
   log line says what the hook found.
+- When an answer gave an ETA for work that goes on after it, the top bar
+  shows it as fleet's ETA column does ("○ ready · ETA 16:30"), and in
+  red once that time has passed.
 - The bottom row runs the `statusLine` command from Claude Code's
   settings, after each turn, with deck's version at the right.
 - The answer pane takes the session's background from fleet's

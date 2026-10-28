@@ -60,6 +60,8 @@ const GREEN: u8 = 78;
 const RED: u8 = 203;
 const AMBER: u8 = 214;
 const WAIT: u8 = 141;
+/// An open ETA, in fleet's colour; RED once it has passed.
+const ETA: u8 = 220;
 /// C-D during a turn shows this first; a second C-D stops the turn and quits.
 const QUIT_WARN: &str = "Claude is still at work: stop it and quit? y/n";
 
@@ -137,6 +139,9 @@ pub struct App {
     step: Instant,
     /// deck was built again since it started; the foot says so.
     old: bool,
+    /// The clock time of the session's open ETA, as fleet shows it; read
+    /// at the start and at the end of each turn.
+    eta: String,
     /// A thin line above the prompt.
     rule: Pane,
     /// The black row between the prompt and the status line.
@@ -267,6 +272,17 @@ fn name(s: &session::Session) -> String {
 /// The window's title: "Deck #notes".
 fn title(s: &session::Session) -> String {
     format!("Deck {}", name(s))
+}
+
+/// The local time, as "15:05".
+fn clock() -> String {
+    // SAFETY: localtime_r fills the tm it is given and keeps nothing.
+    unsafe {
+        let t = libc::time(std::ptr::null_mut());
+        let mut tm: libc::tm = std::mem::zeroed();
+        libc::localtime_r(&t, &mut tm);
+        format!("{:02}:{:02}", tm.tm_hour, tm.tm_min)
+    }
 }
 
 /// True once the binary this deck runs from was rebuilt, so the bottom
@@ -401,6 +417,7 @@ impl App {
         let colour = session::colour(&s.tags);
         let window = known_window(&last.model);
         let history = load_history(&s.cwd);
+        let eta = session::eta(&s.id);
         let mut app = App {
             s,
             claude,
@@ -429,6 +446,7 @@ impl App {
             park: Duration::from_secs(std::env::var("DECK_PARK").ok().and_then(|v| v.parse().ok()).unwrap_or(600)),
             step: Instant::now(),
             old: false,
+            eta,
             ended: None,
             errors,
             status: String::new(),
@@ -574,6 +592,8 @@ impl App {
                     answer = true;
                     log = true;
                     status = true;
+                    // fleet's stop hook has kept or cleared the ETA by now.
+                    self.eta = session::eta(&self.s.id);
                     // Prompts sent with C-Enter run next; the purple ones wait for them.
                     if self.pushed.is_empty() {
                         self.busy = None;
@@ -1247,6 +1267,11 @@ impl App {
             Some(tabs) => format!("{tabs} {}  {}", style::fg(&self.name(), PURPLE), state),
             None => format!(" {}  {}  {}", style::bold("deck"), style::fg(&self.name(), PURPLE), state),
         };
+        if !self.eta.is_empty() && self.ended.is_none() {
+            let eta = if self.eta == "?" { "unknown" } else { &self.eta };
+            let c = if session::late(&self.eta, &clock()) { RED } else { ETA };
+            left += &style::fg(&format!(" · ETA {eta}"), c);
+        }
         if let Some(f) = &self.flash {
             left += &style::dim(&format!(" · {f}"));
         }

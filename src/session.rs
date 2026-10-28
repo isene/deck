@@ -286,9 +286,110 @@ pub fn last_in<'a>(lines: impl Iterator<Item = &'a str>) -> Last {
     l
 }
 
+/// The clock time of the session's open ETA, as fleet's ETA column shows
+/// it: "16:30", "?" for "ETA unknown", empty for none. fleet's stop hook
+/// keeps the answer's ETA line in ~/.fleet/eta/<session id> until a later
+/// answer has none. The reading below is a copy of fleet's (src/done.rs).
+pub fn eta(id: &str) -> String {
+    let id: String = id.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect();
+    fs::read_to_string(home().join(".fleet/eta").join(id))
+        .map(|l| eta_clock(&l).unwrap_or_else(|| "?".into()))
+        .unwrap_or_default()
+}
+
+/// Whether an ETA ("14:20") has passed at `now` ("15:05"). One more than
+/// 12 hours back reads as tomorrow's, and "?" is never late.
+pub fn late(eta: &str, now: &str) -> bool {
+    let mins = |hm: &str| hm.split_once(':').and_then(|(h, m)| Some(h.parse::<i64>().ok()? * 60 + m.parse::<i64>().ok()?));
+    match (mins(eta), mins(now)) {
+        (Some(e), Some(n)) => (1..720).contains(&(n - e).rem_euclid(1440)),
+        _ => false,
+    }
+}
+
+/// The latest time a line gives for work to end: a clock time after "ETA",
+/// "about", "by", "until" and the like, or after a finish verb and "at".
+fn eta_clock(line: &str) -> Option<String> {
+    const FINISH: [&str; 8] = ["ends", "end", "finishes", "finish", "done", "ready", "completes", "lands"];
+    const START: [&str; 6] = ["started", "start", "began", "begun", "since", "from"];
+    let line = unquoted(line).replace('~', " about ");
+    let w: Vec<&str> = line
+        .split(|c: char| !(c.is_alphanumeric() || c == ':'))
+        .map(|t| t.trim_matches(':'))
+        .filter(|t| !t.is_empty())
+        .collect();
+    let is_clock = |t: &str| {
+        t.split_once(':').is_some_and(|(h, m)| {
+            (1..=2).contains(&h.len()) && m.len() == 2 && h.bytes().chain(m.bytes()).all(|b| b.is_ascii_digit())
+        })
+    };
+    let minutes = |c: &str| c.split_once(':').and_then(|(h, m)| Some(h.parse::<u32>().ok()? * 60 + m.parse::<u32>().ok()?)).unwrap_or(0);
+    let at = |i: usize| w.get(i).copied().unwrap_or("");
+    let mut best: Option<&str> = None;
+    let mut unknown = false;
+    for i in 0..w.len() {
+        let low = w[i].to_lowercase();
+        let clock = if w[i] == "ETA" {
+            unknown |= at(i + 1).eq_ignore_ascii_case("unknown");
+            Some(at(i + 1))
+        } else if matches!(low.as_str(), "about" | "around" | "roughly" | "by" | "before" | "until" | "till") {
+            (!START.contains(&at(i.wrapping_sub(1)).to_lowercase().as_str())).then(|| at(i + 1))
+        } else if FINISH.contains(&low.as_str()) && at(i + 1).eq_ignore_ascii_case("at") {
+            Some(at(i + 2))
+        } else {
+            None
+        };
+        if let Some(c) = clock.filter(|c| is_clock(c)) {
+            if best.is_none_or(|b| minutes(c) >= minutes(b)) {
+                best = Some(c);
+            }
+        }
+    }
+    best.map(String::from).or(unknown.then(|| "?".into()))
+}
+
+/// The line with its quotes cut out: a quoted "ETA about 13:27" is
+/// another session's.
+fn unquoted(line: &str) -> String {
+    let mut open = None;
+    line.chars()
+        .filter(|&c| {
+            let close = match c {
+                '“' => Some('”'),
+                '"' | '`' => Some(c),
+                _ => None,
+            };
+            match open {
+                Some(end) if c == end => {
+                    open = None;
+                    false
+                }
+                Some(_) => false,
+                None if close.is_some() => {
+                    open = close;
+                    false
+                }
+                None => true,
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_eta_is_read_as_fleet_reads_it() {
+        assert_eq!(eta_clock("ETA about 16:30. That assumes gte reads 100 pairs in 32 s.").as_deref(), Some("16:30"));
+        assert_eq!(eta_clock("The run ends at 9:05, and the check by 9:20.").as_deref(), Some("9:20"));
+        assert_eq!(eta_clock("ETA unknown: the server gives no rate.").as_deref(), Some("?"));
+        assert_eq!(eta_clock("It started about 12:00, as \"ETA about 13:27\" said."), None);
+        assert!(late("14:45", "15:40"));
+        assert!(late("23:50", "00:10"));
+        assert!(!late("16:05", "15:40"));
+        assert!(!late("?", "15:40"));
+    }
 
     #[test]
     fn the_colour_comes_from_the_sessions_tag() {
