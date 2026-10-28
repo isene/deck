@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.23 (2026-10-28)
+
+- A message sent with C-Enter during a turn turns blue at once, since
+  Claude has it; before, it stayed purple until Claude read it. Claude
+  reads it only when its current step ends, and the bar says so: "1
+  sent, read when Bash ends" in place of "1 waiting". Purple, and "N
+  waiting", are for messages deck still holds.
+
 ## 0.1.22 (2026-10-28)
 
 - Closing deck's window stops Claude at once, with its commands, a

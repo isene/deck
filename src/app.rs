@@ -513,7 +513,7 @@ impl App {
                     self.log.push(Line::Stopped);
                     log = true;
                 }
-                // Only a prompt sent with C-Enter; the rest turned blue when sent.
+                // Only a prompt sent with C-Enter; the rest started a turn when sent.
                 Event::Taken(text) if self.pushed.front().is_some_and(|p| p.trim() == text.trim()) => {
                     let text = self.pushed.pop_front().unwrap_or(text);
                     match self.turns.last_mut() {
@@ -730,10 +730,15 @@ impl App {
         if self.busy.is_none() {
             return;
         }
+        if self.waiting.is_empty() {
+            return;
+        }
         while let Some(text) = self.waiting.pop_front() {
             self.claude.say(&text);
             self.pushed.push_back(text);
         }
+        // Blue now: Claude has them.
+        self.fill_answer(true);
     }
 
     /// A new turn on screen, for a prompt Claude has.
@@ -1225,10 +1230,14 @@ impl App {
                 _ => None,
             });
             let p = self.step.elapsed().as_secs();
-            st += &format!(" · {} {}:{:02}", running.unwrap_or("thinking"), p / 60, p % 60);
-            let waiting = self.waiting.len() + self.pushed.len();
-            if waiting > 0 {
-                st += &format!(" · {waiting} waiting");
+            let step = running.unwrap_or("thinking");
+            st += &format!(" · {step} {}:{:02}", p / 60, p % 60);
+            // Claude reads a prompt sent mid-turn only between two steps.
+            if !self.pushed.is_empty() {
+                st += &format!(" · {} sent, read when {step} ends", self.pushed.len());
+            }
+            if !self.waiting.is_empty() {
+                st += &format!(" · {} waiting", self.waiting.len());
             }
             style::fg(&st, AMBER) + &style::dim("   Esc stops")
         } else {
@@ -1382,8 +1391,14 @@ impl App {
                 None => {}
             }
             let mut latest = blocks.pop().unwrap_or_default();
-            if !self.waiting.is_empty() || !self.pushed.is_empty() {
-                latest += &format!("\n\n{}", waiting_text(self.pushed.iter().chain(&self.waiting)));
+            // Sent ones in blue, held ones in purple.
+            let tail: Vec<String> = [(&self.pushed, BLUE), (&self.waiting, WAIT)]
+                .into_iter()
+                .filter(|(q, _)| !q.is_empty())
+                .map(|(q, colour)| waiting_text(q.iter(), colour))
+                .collect();
+            if !tail.is_empty() {
+                latest += &format!("\n\n{}", tail.join("\n"));
             }
             (blocks.join("\n\n"), latest)
         };
@@ -1537,8 +1552,8 @@ fn turn_text(t: &mut Turn, width: usize) -> String {
 }
 
 /// Prompts sent while Claude works, in their own colour until they go.
-fn waiting_text<'a>(waiting: impl Iterator<Item = &'a String>) -> String {
-    let lines: Vec<String> = waiting.flat_map(|p| p.lines()).map(|l| style::fg(&format!("› {l}"), WAIT)).collect();
+fn waiting_text<'a>(waiting: impl Iterator<Item = &'a String>, colour: u8) -> String {
+    let lines: Vec<String> = waiting.flat_map(|p| p.lines()).map(|l| style::fg(&format!("› {l}"), colour)).collect();
     lines.join("\n")
 }
 
@@ -1769,7 +1784,7 @@ mod tests {
 
     #[test]
     fn a_waiting_prompt_is_drawn() {
-        let text = crust::strip_ansi(&waiting_text(["one\ntwo".to_string(), "three".to_string()].iter()));
+        let text = crust::strip_ansi(&waiting_text(["one\ntwo".to_string(), "three".to_string()].iter(), WAIT));
         assert_eq!(text, "› one\n› two\n› three");
     }
 
