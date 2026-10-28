@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.22 (2026-10-28)
+
+- Closing deck's window stops Claude at once, with its commands, a
+  background job too, as y after C-D does. Before, Claude went on alone
+  with no window until its turn and its jobs were done. On Linux only.
+
 ## 0.1.21 (2026-10-28)
 
 - Under gluon, deck no longer writes "<app> screen attached" in the

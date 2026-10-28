@@ -263,8 +263,18 @@ impl Claude {
         for (k, v) in env {
             cmd.env(k, v);
         }
-        // Its own process group, so closing the window does not cut it off
-        // while it ends after deck.
+        // Its own process group, so the hangup of a closing window does not
+        // reach it; the kernel ends it instead, with SIGTERM, when the
+        // thread that starts it ends: deck's main thread, so when deck
+        // ends, by C-D or by the window closing. Claude Code then stops its
+        // commands too, a background job as well.
+        #[cfg(target_os = "linux")]
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
+                Ok(())
+            });
+        }
         let mut child = cmd
             .process_group(0)
             .current_dir(cwd)
@@ -493,6 +503,11 @@ mod tests {
             let st = std::fs::read_to_string(format!("/proc/{p}/stat")).unwrap_or_default();
             assert!(st.is_empty() || st.contains(") Z"), "{p} still runs: {st}");
         }
+        // Ended with the thread that started it, as when deck's window closes.
+        let mut orphan = std::thread::scope(|s| s.spawn(|| start("exec sleep 30")).join().unwrap());
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert_eq!(state(&orphan), 'Z');
+        orphan.stop(true);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
