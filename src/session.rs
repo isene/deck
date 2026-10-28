@@ -311,7 +311,7 @@ pub fn late(eta: &str, now: &str) -> bool {
 /// "about", "by", "until" and the like, or after a finish verb and "at".
 fn eta_clock(line: &str) -> Option<String> {
     const FINISH: [&str; 8] = ["ends", "end", "finishes", "finish", "done", "ready", "completes", "lands"];
-    const START: [&str; 6] = ["started", "start", "began", "begun", "since", "from"];
+    const START: [&str; 7] = ["started", "start", "began", "begun", "since", "from", "after"];
     let line = unquoted(line).replace('~', " about ");
     let w: Vec<&str> = line
         .split(|c: char| !(c.is_alphanumeric() || c == ':'))
@@ -385,6 +385,7 @@ mod tests {
         assert_eq!(eta_clock("The run ends at 9:05, and the check by 9:20.").as_deref(), Some("9:20"));
         assert_eq!(eta_clock("ETA unknown: the server gives no rate.").as_deref(), Some("?"));
         assert_eq!(eta_clock("It started about 12:00, as \"ETA about 13:27\" said."), None);
+        assert_eq!(eta_clock("2. Your move: after about 16:00 tomorrow, run the flip."), None);
         assert!(late("14:45", "15:40"));
         assert!(late("23:50", "00:10"));
         assert!(!late("16:05", "15:40"));
