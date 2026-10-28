@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.17 (2026-10-28)
+
+- `App::ask` sends a prompt from the app deck runs in, as if typed and
+  sent with Enter; it waits in purple while Claude is busy. gluon's
+  Ctrl+S uses it.
+
 ## 0.1.16 (2026-10-27)
 
 - After 10 minutes with no turn, deck pauses Claude Code with SIGSTOP and

@@ -377,6 +377,21 @@ impl App {
         self.fill_side();
     }
 
+    /// A prompt from the app around deck (gluon's Ctrl+S), as if typed and
+    /// sent with Enter: it waits in purple while Claude is busy. It goes in
+    /// no history, and what is being typed stays.
+    pub fn ask(&mut self, text: &str) {
+        if self.ended.is_some() {
+            return;
+        }
+        if self.busy.is_some() {
+            self.waiting.push_back(text.to_string());
+            self.fill_answer(true);
+        } else {
+            self.send(text.to_string());
+        }
+    }
+
     /// The session's id, so gluon can open it again next time.
     pub fn session_id(&self) -> &str {
         &self.s.id
