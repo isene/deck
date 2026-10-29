@@ -31,7 +31,7 @@ const KEYS: &[(&str, &str)] = &[
     ("C-Enter", "send the purple prompts now; blue once Claude reads them"),
     ("S-Enter, C-J", "a new line in the prompt; so does \\ before Enter"),
     ("Esc", "stop the turn Claude is on"),
-    ("Up, Down", "the row above or below, else earlier prompts"),
+    ("Up, Down", "the row above or below, else earlier prompts that start as typed"),
     ("! command", "run it in a shell; Claude reads what it printed and answers"),
     ("C-A, C-E", "to the start or end of the prompt"),
     ("C-U, C-K", "delete to the start or end of the prompt"),
@@ -584,6 +584,11 @@ impl App {
                     }
                     let first = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
                     self.notify(if failed && first.is_empty() { "stopped" } else { first });
+                    // A script to run goes to the clipboard, ready to paste.
+                    if let Some(cmd) = script_to_run(&text) {
+                        crust::clipboard_copy(cmd, "clipboard");
+                        self.flash = Some(format!("on the clipboard: {cmd}"));
+                    }
                     if let Some(t) = self.turns.last_mut() {
                         t.answer = Some(text);
                         t.failed = failed;
@@ -1085,6 +1090,10 @@ impl App {
     /// Up and Down move between the prompt's rows, and past the first or
     /// last row to the prompts sent before, as in Claude Code.
     fn up_down(&mut self, up: bool) {
+        // A prompt Up brought back and then edited starts a new search.
+        if self.history.get(self.back).is_some_and(|h| *h != self.input.iter().collect::<String>()) {
+            self.back = self.history.len();
+        }
         let rows = input_rows(&self.input, self.line.w as usize);
         let (r, col) = cursor_at(&rows, &self.input, self.at);
         let to = if up { r.checked_sub(1) } else { Some(r + 1).filter(|&n| n < rows.len()) };
@@ -1094,13 +1103,24 @@ impl App {
             if self.back == self.history.len() {
                 self.draft = self.input.iter().collect();
             }
-            self.back -= 1;
-            let h = self.history[self.back].clone();
-            self.set_input(&h);
+            if let Some(i) = search(&self.history, self.back, &self.draft, true) {
+                self.back = i;
+                let h = self.history[i].clone();
+                self.set_input(&h);
+            }
         } else if !up && self.back < self.history.len() {
-            self.back += 1;
-            let h = self.history.get(self.back).cloned().unwrap_or_else(|| std::mem::take(&mut self.draft));
-            self.set_input(&h);
+            match search(&self.history, self.back, &self.draft, false) {
+                Some(i) => {
+                    self.back = i;
+                    let h = self.history[i].clone();
+                    self.set_input(&h);
+                }
+                None => {
+                    self.back = self.history.len();
+                    let d = std::mem::take(&mut self.draft);
+                    self.set_input(&d);
+                }
+            }
         }
     }
 
@@ -1625,6 +1645,22 @@ fn cache_file() -> String {
     format!("{dir}/deck.json")
 }
 
+/// The prompt before or after `from` that starts with what was typed
+/// before Up, as in bare: "! " and Up goes back through the ! commands.
+fn search(history: &[String], from: usize, typed: &str, up: bool) -> Option<usize> {
+    if up {
+        history[..from].iter().rposition(|h| h.starts_with(typed))
+    } else {
+        history.get(from + 1..)?.iter().position(|h| h.starts_with(typed)).map(|i| from + 1 + i)
+    }
+}
+
+/// The first `! command` written as code in an answer: how an answer hands
+/// over a script to run ("Your move: `! /tmp/fix.sh`").
+fn script_to_run(text: &str) -> Option<&str> {
+    text.split('`').skip(1).step_by(2).map(str::trim).find(|c| c.starts_with("! "))
+}
+
 fn history_file() -> String {
     format!("{}/.claude/history.jsonl", std::env::var("HOME").unwrap_or_default())
 }
@@ -1811,6 +1847,26 @@ mod tests {
     fn a_waiting_prompt_is_drawn() {
         let text = crust::strip_ansi(&waiting_text(["one\ntwo".to_string(), "three".to_string()].iter(), WAIT));
         assert_eq!(text, "› one\n› two\n› three");
+    }
+
+    #[test]
+    fn up_finds_the_prompts_that_start_as_typed() {
+        let h: Vec<String> = ["! a.sh", "hello", "! b.sh", "hi"].map(String::from).to_vec();
+        assert_eq!(search(&h, 4, "! ", true), Some(2));
+        assert_eq!(search(&h, 2, "! ", true), Some(0));
+        assert_eq!(search(&h, 0, "! ", true), None);
+        assert_eq!(search(&h, 0, "! ", false), Some(2));
+        assert_eq!(search(&h, 2, "! ", false), None);
+        assert_eq!(search(&h, 4, "", true), Some(3));
+        assert_eq!(search(&h, 3, "", false), None);
+    }
+
+    #[test]
+    fn a_script_to_run_is_found_in_the_answer() {
+        let text = "Fixed.\n\n1. Your move: run `! /tmp/fix.sh`, which prints ok.\n2. Your move: `! /tmp/b.sh`";
+        assert_eq!(script_to_run(text), Some("! /tmp/fix.sh"));
+        assert_eq!(script_to_run("```bash\n! not this\n```\nand `x != y`"), None);
+        assert_eq!(script_to_run("no code here"), None);
     }
 
     #[test]
