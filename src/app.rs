@@ -3,13 +3,14 @@
 //! bottom row. When a stop hook sends an answer back, only the rewrite is
 //! shown, with one line in the log saying so.
 
-use crate::claude::{Claude, Event, WAKE};
+use crate::claude::{Claude, Event, BUS, WAKE};
 use crate::{claude, session};
 use crust::{seq, style, Crust, Cursor, Input, Pane, Popup};
 use serde_json::{json, Value};
 use std::collections::VecDeque;
 use std::fs;
 use std::io::Write;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -24,6 +25,9 @@ Usage:
 
 Keys:
 ";
+
+/// The prompt fleet types into a session's window to hand it its messages.
+const WAKE_PROMPT: &str = "Check fleet messages";
 
 /// The keys, for `deck --help` and the C-? popup.
 const KEYS: &[(&str, &str)] = &[
@@ -147,6 +151,8 @@ pub struct App {
     /// The black row between the prompt and the status line.
     blank: Pane,
     ended: Option<String>,
+    /// The fleet mailboxes deck watches, under gluon; else none.
+    mail: Vec<PathBuf>,
     errors: String,
     status: String,
     input: Vec<char>,
@@ -188,7 +194,7 @@ pub fn run() {
         Some("-v" | "--version") => return println!("deck {VERSION}"),
         _ => {}
     }
-    let mut app = start(args.first().map(String::as_str), None).unwrap_or_else(|e| quit(&e));
+    let mut app = start(args.first().map(String::as_str), None, None).unwrap_or_else(|e| quit(&e));
     while app.running {
         let wait = app.before_wait();
         let key = Input::getchr(Some(wait));
@@ -199,8 +205,9 @@ pub fn run() {
 
 /// Open the session `arg` names (a tag or an id), or a new one in `dir`
 /// (else in the current directory), start Claude Code in it and draw the
-/// screen.
-pub fn start(arg: Option<&str>, dir: Option<&str>) -> Result<App, String> {
+/// screen. With `mail`, a bookmark tag, deck asks Claude to read each
+/// fleet message for that tag as it lands (gluon does this).
+pub fn start(arg: Option<&str>, dir: Option<&str>, mail: Option<&str>) -> Result<App, String> {
     let mut s = session::find(arg)?;
     if s.resume {
         if let Some(pid) = session::open_elsewhere(&s.id) {
@@ -217,6 +224,11 @@ pub fn start(arg: Option<&str>, dir: Option<&str>) -> Result<App, String> {
     let mut env = vec![("CC_SESSION_ID", s.id.clone()), ("HL_RAW", "1".to_string())];
     if !s.tags.is_empty() {
         env.push(("CC_RESUME_TAGS", s.tags.join(" ")));
+    }
+    // fleet types its prompt into the window of a session without this,
+    // where the keys would land in whatever pane of gluon has them.
+    if mail.is_some() {
+        env.push(("FLEET_SELF_WAKE", "1".to_string()));
     }
     let (tx, rx) = mpsc::channel();
     let claude = Claude::start(&s.id, s.resume, &s.cwd, &env, file, tx.clone())
@@ -236,6 +248,9 @@ pub fn start(arg: Option<&str>, dir: Option<&str>) -> Result<App, String> {
     Crust::enable_focus_reports();
 
     let mut app = App::new(s, last, claude, tx, rx, errors);
+    if let Some(tag) = mail {
+        app.mail = watch_mail(tag);
+    }
     app.layout();
     // The key reader catches the wake-up signal only once it has started.
     // Start it, then take what came before, so nothing waits for a key.
@@ -244,6 +259,42 @@ pub fn start(arg: Option<&str>, dir: Option<&str>) -> Result<App, String> {
     app.drain();
     app.run_status();
     Ok(app)
+}
+
+/// The two mailboxes fleet's bus hook reads for `tag` (sessions write to
+/// bus, the phone to relay), watched by a thread that sleeps in read()
+/// until a file lands in one. Without ~/.fleet there is nothing to watch.
+#[cfg(target_os = "linux")]
+fn watch_mail(tag: &str) -> Vec<PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+    let fleet = PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".fleet");
+    if !fleet.is_dir() {
+        return Vec::new();
+    }
+    let fd = unsafe { libc::inotify_init1(libc::IN_CLOEXEC) };
+    if fd < 0 {
+        return Vec::new();
+    }
+    let dirs: Vec<PathBuf> = ["bus", "relay"].iter().map(|r| fleet.join(r).join(tag)).collect();
+    for d in &dirs {
+        let _ = fs::create_dir_all(d);
+        if let Ok(p) = std::ffi::CString::new(d.as_os_str().as_bytes()) {
+            unsafe { libc::inotify_add_watch(fd, p.as_ptr(), libc::IN_CLOSE_WRITE | libc::IN_MOVED_TO) };
+        }
+    }
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 4096];
+        while unsafe { libc::read(fd, buf.as_mut_ptr().cast(), buf.len()) } > 0 {
+            BUS.store(true, Ordering::SeqCst);
+            claude::wake();
+        }
+    });
+    dirs
+}
+
+#[cfg(not(target_os = "linux"))]
+fn watch_mail(_: &str) -> Vec<PathBuf> {
+    Vec::new()
 }
 
 /// End Claude Code and give the terminal back.
@@ -324,6 +375,18 @@ impl App {
         // Cleared before the drain, so an event sent after it wakes again.
         WAKE.store(false, Ordering::SeqCst);
         self.drain();
+        // A message landed: ask Claude to read it, as fleet's typed prompt
+        // would, but whichever pane has the keys. While Claude works,
+        // fleet's stop hook hands it over at the end of the turn, so only
+        // a message still in the mailbox then is asked for.
+        if self.busy.is_none()
+            && self.ended.is_none()
+            && BUS.swap(false, Ordering::SeqCst)
+            && self.mail.iter().any(|d| fs::read_dir(d).is_ok_and(|mut f| f.next().is_some()))
+        {
+            self.claude.say(WAKE_PROMPT);
+            self.start(WAKE_PROMPT.to_string());
+        }
         // Idle long enough: pause Claude. With a job of its own running it
         // stays awake, and is asked again after the same wait.
         if self.busy.is_none() && self.quiet.is_some_and(|t| t.elapsed() >= self.park) {
@@ -448,6 +511,7 @@ impl App {
             old: false,
             eta,
             ended: None,
+            mail: Vec::new(),
             errors,
             status: String::new(),
             input: Vec::new(),

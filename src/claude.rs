@@ -19,6 +19,9 @@ use std::sync::mpsc::Sender;
 /// drains: an event that lands after the clear signals again.
 pub static WAKE: AtomicBool = AtomicBool::new(false);
 
+/// Set by the mailbox watch when a message lands for the session.
+pub static BUS: AtomicBool = AtomicBool::new(false);
+
 /// Output of a tool call is kept up to this many bytes, for the detail view.
 const KEEP: usize = 20_000;
 

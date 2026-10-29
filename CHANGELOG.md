@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.27 (2026-10-29)
+
+- Under gluon, a fleet message for the session goes to Claude as it
+  lands, whichever pane has the keys: deck sends "Check fleet messages"
+  itself. Before, fleet typed that line into the window, and in gluon
+  the keys went to the Mail tab or a box at Home. deck starts Claude
+  with FLEET_SELF_WAKE=1, so fleet 0.3.74 types nothing there. While
+  Claude works, the stop hook hands the message over at the end of the
+  turn. Cost: one thread asleep in read() on two mailboxes; no wakeups
+  while idle.
+
 ## 0.1.24 (2026-10-28)
 
 - The top bar shows the session's open ETA, as fleet's ETA column does:
