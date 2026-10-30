@@ -1,6 +1,6 @@
 [package]
 name = "deck"
-version = "0.1.32"
+version = "0.1.33"
 edition = "2021"
 authors = ["Geir Isene <g@isene.com>"]
 description = "A paned terminal front for Claude Code: the answer in its own pane, each tool call one line beside it, the status line at the bottom. Part of the Fe2O3 Rust terminal suite."

@@ -116,8 +116,8 @@ pub struct App {
     /// box as when another window is.
     hidden: bool,
     /// Under gluon's Home tab: deck's rows, as (the row above the first,
-    /// how many). None is the whole screen.
-    area: Option<(u16, u16)>,
+    /// how many), and the columns left of it. None is the whole screen.
+    area: Option<(u16, u16, u16)>,
     /// The terminal's size when the panes were laid out.
     size: (u16, u16),
     /// Under gluon: deck drew outside its area (a popup, the editor), so
@@ -425,9 +425,9 @@ impl App {
         self.hidden = hidden;
     }
 
-    /// Under gluon's Home tab: draw in `rows` rows below row `top`, or on
-    /// the whole screen with None.
-    pub fn set_area(&mut self, area: Option<(u16, u16)>) {
+    /// Under gluon's Home tab: draw in `rows` rows below row `top`, `left`
+    /// columns in, as (top, rows, left), or on the whole screen with None.
+    pub fn set_area(&mut self, area: Option<(u16, u16, u16)>) {
         self.area = area;
         self.layout();
     }
@@ -1334,7 +1334,8 @@ impl App {
     fn layout(&mut self) {
         let (cols, all) = Crust::terminal_size();
         self.size = (cols, all);
-        let (top, rows) = self.area.unwrap_or((0, all));
+        let (top, rows, left) = self.area.unwrap_or((0, all, 0));
+        let (x, cols) = (left + 1, cols.saturating_sub(left));
         self.rows = rows;
         let n = self.input_height(cols);
         let h = rows.saturating_sub(4 + n).max(1);
@@ -1343,15 +1344,15 @@ impl App {
             p.wrap = false;
             p.scroll = false;
         };
-        self.bar = Pane::new(1, top + 1, cols, 1, 255, 236);
+        self.bar = Pane::new(x, top + 1, cols, 1, 255, 236);
         one(&mut self.bar);
         // One blank column keeps the answer's scroll mark off the log.
-        self.answer = Pane::new(1, top + 2, cols - sw - u16::from(sw > 0), h, 231, 0);
+        self.answer = Pane::new(x, top + 2, cols - sw - u16::from(sw > 0), h, 231, 0);
         if let Some(hex) = &self.colour {
             self.answer.set_bg_hex(hex);
         }
         self.gap = (sw > 0).then(|| {
-            let mut p = Pane::new(cols - sw, top + 2, 1, h, 252, 0);
+            let mut p = Pane::new(left + cols - sw, top + 2, 1, h, 252, 0);
             one(&mut p);
             if let Some(hex) = &self.colour {
                 p.set_bg_hex(hex);
@@ -1359,13 +1360,13 @@ impl App {
             p
         });
         self.side = (sw > 0).then(|| {
-            let mut p = Pane::new(cols - sw + 1, top + 2, sw, h, 246, 233);
+            let mut p = Pane::new(left + cols - sw + 1, top + 2, sw, h, 246, 233);
             p.wrap = false;
             p
         });
         self.input_panes(n);
         // Dark grey sets the status line apart from the answer pane above it.
-        self.foot = Pane::new(1, top + rows, cols, 1, 252, 236);
+        self.foot = Pane::new(x, top + rows, cols, 1, 252, 236);
         one(&mut self.foot);
         print!("{}", seq::HIDE);
         if self.area.is_none() {
@@ -1483,12 +1484,12 @@ impl App {
     /// The prompt's rows on black, a thin line above them, and a black
     /// row between them and the status line.
     fn input_panes(&mut self, n: u16) {
-        let cols = self.bar.w;
+        let (x, cols) = (self.bar.x, self.bar.w);
         let top = self.area.map_or(0, |a| a.0);
         let y = (top + self.rows).saturating_sub(n + 1).max(top + 2);
-        self.rule = Pane::new(1, y - 1, cols, 1, self.rule_colour(), 0);
-        self.line = Pane::new(1, y, cols, n, 231, 0);
-        self.blank = Pane::new(1, (top + self.rows).saturating_sub(1), cols, 1, 240, 0);
+        self.rule = Pane::new(x, y - 1, cols, 1, self.rule_colour(), 0);
+        self.line = Pane::new(x, y, cols, n, 231, 0);
+        self.blank = Pane::new(x, (top + self.rows).saturating_sub(1), cols, 1, 240, 0);
         for p in [&mut self.rule, &mut self.line] {
             p.wrap = false;
             p.scroll = false;
@@ -1533,7 +1534,7 @@ impl App {
             let rows = input_rows(&self.input, self.line.w as usize);
             let (r, col) = cursor_at(&rows, &self.input, self.at);
             let y = self.line.y + (r - self.input_top(&rows)) as u16;
-            Cursor::set(col as u16 + 1, y);
+            Cursor::set(self.line.x + col as u16, y);
             print!("{}", seq::SHOW);
         }
         let _ = std::io::stdout().flush();

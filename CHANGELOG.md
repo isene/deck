@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.33 (2026-10-30)
+
+- Under gluon, deck can start some columns in from the left, so gluon's
+  Star Trek look keeps its sidebar beside the Claude pane.
+
 ## 0.1.32 (2026-10-30)
 
 - `/model` alone opens a popup of models (opus, sonnet, haiku, fable,
