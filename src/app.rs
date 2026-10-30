@@ -597,7 +597,7 @@ impl App {
                 }
                 // Only a prompt sent with C-Enter; the rest started a turn when sent.
                 Event::Taken(text) if self.pushed.front().is_some_and(|p| p.trim() == text.trim()) => {
-                    let text = self.pushed.pop_front().unwrap_or(text);
+                    let text = shown(&self.pushed.pop_front().unwrap_or(text));
                     match self.turns.last_mut() {
                         // Read inside the running turn, whose answer covers both.
                         Some(t) if t.answer.is_none() => {
@@ -807,6 +807,9 @@ impl App {
     }
 
     fn send(&mut self, text: String) {
+        if let Some(cmd) = text.strip_prefix('!') {
+            return self.shell(cmd.trim());
+        }
         let seen = std::mem::take(&mut self.seen);
         self.claude.say(&format!("{seen}{text}"));
         self.start(text);
@@ -823,6 +826,11 @@ impl App {
             return;
         }
         while let Some(text) = self.waiting.pop_front() {
+            // A ! command runs now, and its output goes to Claude in blue.
+            if let Some(cmd) = text.strip_prefix('!') {
+                self.shell(cmd.trim());
+                continue;
+            }
             self.claude.say(&text);
             self.pushed.push_back(text);
         }
@@ -1203,15 +1211,8 @@ impl App {
         if text.is_empty() || self.ended.is_some() {
             return;
         }
-        if let Some(cmd) = text.strip_prefix('!') {
-            if self.busy.is_some() {
-                self.flash = Some("a ! command waits until Claude's turn ends".into());
-                return;
-            }
-            self.remember(&text);
-            return self.shell(cmd.trim());
-        }
         self.remember(&text);
+        // A ! command waits in purple too, and runs when its turn comes.
         if self.busy.is_some() {
             self.waiting.push_back(text);
             self.fill_answer(true);
@@ -1252,6 +1253,13 @@ impl App {
         let mut answer = format!("```\n{}\n```", last_lines(&out, SHOWN));
         if let Some(c) = code.filter(|_| failed) {
             answer += &format!("\nexit {c}");
+        }
+        // Sent with C-Enter while Claude works: it reads the output at its
+        // next tool call, and the command waits in blue until then.
+        if self.busy.is_some() {
+            self.claude.say(&said);
+            self.pushed.push_back(said);
+            return self.layout();
         }
         let prompt = format!("! {cmd}");
         self.turns.push(Turn { prompt: prompt.clone(), answer: Some(answer), failed, log_at: self.log.len(), drawn: None });
@@ -1662,8 +1670,19 @@ fn turn_text(t: &mut Turn, width: usize) -> String {
 
 /// Prompts sent while Claude works, in their own colour until they go.
 fn waiting_text<'a>(waiting: impl Iterator<Item = &'a String>, colour: u8) -> String {
-    let lines: Vec<String> = waiting.flat_map(|p| p.lines()).map(|l| style::fg(&format!("› {l}"), colour)).collect();
+    let lines: Vec<String> = waiting
+        .flat_map(|p| shown(p).lines().map(|l| style::fg(&format!("› {l}"), colour)).collect::<Vec<_>>())
+        .collect();
     lines.join("\n")
+}
+
+/// A ! command sent while Claude works shows as the command; its output
+/// goes to Claude, not on the screen twice.
+fn shown(p: &str) -> String {
+    match p.strip_prefix("<bash-input>").and_then(|r| r.split_once("</bash-input>")) {
+        Some((cmd, _)) => format!("! {cmd}"),
+        None => p.to_string(),
+    }
 }
 
 /// A prompt in the log: its lines without the blank ones, up to ten.
@@ -1905,6 +1924,13 @@ mod tests {
         let shown = crust::strip_ansi(&prompt_lines(&long));
         assert_eq!(shown.lines().count(), 11);
         assert!(shown.ends_with("… 2 more lines"));
+    }
+
+    #[test]
+    fn a_bang_command_sent_mid_turn_shows_as_the_command() {
+        let said = "<bash-input>ls -l</bash-input>\n<bash-stdout>a\nb</bash-stdout>\n".to_string();
+        let text = crust::strip_ansi(&waiting_text([said, "!pwd".to_string()].iter(), BLUE));
+        assert_eq!(text, "› ! ls -l\n› !pwd");
     }
 
     #[test]

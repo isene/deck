@@ -52,6 +52,7 @@ deck <id>         open the session with this id
 |---|---|
 | Enter | send; while Claude works, the message waits its turn, in purple |
 | C-Enter | send the purple messages now; they turn blue, and Claude reads them when its current step ends |
+| `!` command | runs on the terminal; while Claude works it waits in purple like a message, and C-Enter runs it now and sends Claude its output |
 | S-Enter, C-J, \\ Enter | a new line in the prompt |
 | Up, Down | the row above or below, else earlier prompts, also from past runs; with text typed, only the prompts that start with it (`! ` and Up: the ! commands) |
 | !command | run it in a shell; Claude reads what it printed and answers. When an answer hands you a script as code, `` `! /tmp/fix.sh` ``, deck puts it on the clipboard |
