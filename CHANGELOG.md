@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.31 (2026-10-30)
+
+- The quit popup and the key popup hide the cursor. Before, it sat as
+  a block beside the popup, where the last character was drawn.
+
 ## 0.1.27 (2026-10-29)
 
 - Under gluon, a fleet message for the session goes to Claude as it

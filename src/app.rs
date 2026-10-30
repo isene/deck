@@ -1119,6 +1119,8 @@ impl App {
         let hint = "y quits, any other key stays";
         let w = crust::display_width(&q).max(hint.len()) as u16 + 2;
         let mut pop = Popup::centered(w, 2, 231, 236);
+        // No cursor while a popup is up; layout() puts it back after.
+        print!("{}", seq::HIDE);
         pop.show(&format!(" {}\n {}", style::bold(&q), style::dim(hint)));
         let yes = matches!(Input::getchr(None).as_deref(), Some("y" | "Y"));
         self.over = true;
@@ -1138,6 +1140,7 @@ impl App {
         let w = t.lines().map(crust::display_width).max().unwrap_or(0) as u16 + 4;
         let h = t.lines().count() as u16;
         let mut pop = Popup::centered(w.min(cols.saturating_sub(4)), h.min(rows.saturating_sub(4)), 231, 236);
+        print!("{}", seq::HIDE);
         pop.view(t);
         self.over = true;
         self.layout();
