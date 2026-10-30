@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.32 (2026-10-30)
+
+- `/model` alone opens a popup of models (opus, sonnet, haiku, fable,
+  default), with the bar on the one in use. The pick goes to Claude Code
+  as `/model <name>`, the same as typing it. No cost until it is used.
+
 ## 0.1.31 (2026-10-30)
 
 - The quit popup and the key popup hide the cursor. Before, it sat as

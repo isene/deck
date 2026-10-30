@@ -37,6 +37,7 @@ const KEYS: &[(&str, &str)] = &[
     ("Esc", "stop the turn Claude is on"),
     ("Up, Down", "the row above or below, else earlier prompts that start as typed"),
     ("! command", "run it in a shell; Claude reads what it printed and answers"),
+    ("/model", "pick the model in a popup; /model sonnet switches at once"),
     ("C-A, C-E", "to the start or end of the prompt"),
     ("C-U, C-K", "delete to the start or end of the prompt"),
     ("C-Backspace", "delete a word"),
@@ -53,6 +54,9 @@ const KEYS: &[(&str, &str)] = &[
     ("C-?", "this help"),
     ("C-D", "quit; a popup asks first while Claude or a command of its runs, and always under gluon"),
 ];
+
+/// What the /model popup offers; Claude Code takes each name for its newest model.
+const MODELS: &[&str] = &["opus", "sonnet", "haiku", "fable", "default"];
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -1128,6 +1132,29 @@ impl App {
         yes
     }
 
+    /// The models /model offers, with the bar on the one in use. Esc picks none.
+    fn pick_model(&mut self) -> Option<String> {
+        self.over = true;
+        let now = model_name(&self.model).split(' ').next().unwrap_or("").to_lowercase();
+        let mut items = vec![format!(" {}", style::bold("Switch to")), String::new()];
+        for m in MODELS {
+            let note = match *m {
+                _ if *m == now => "  in use",
+                "default" => "  the one in settings.json",
+                _ => "",
+            };
+            items.push(format!(" {}{}", style::fg(m, GREEN), style::dim(note)));
+        }
+        let w = items.iter().map(|i| crust::display_width(i)).max().unwrap_or(0) as u16 + 2;
+        let mut pop = Popup::centered(w, items.len() as u16, 231, 236);
+        pop.pane.index = 2 + MODELS.iter().position(|m| *m == now).unwrap_or(0);
+        // No cursor while a popup is up; layout() puts it back after.
+        print!("{}", seq::HIDE);
+        let at = pop.modal(&items.join("\n"));
+        self.layout();
+        MODELS.get(at?.checked_sub(2)?).map(|m| m.to_string())
+    }
+
     /// The keys in a popup, as in the other Fe2O3 programs. Esc, q or Enter
     /// closes it.
     fn show_help(&mut self) {
@@ -1231,6 +1258,15 @@ impl App {
         if text.is_empty() || self.ended.is_some() {
             return;
         }
+        // /model alone picks in a popup; the pick goes on as "/model <name>".
+        let text = if text == "/model" {
+            match self.pick_model() {
+                Some(m) => format!("/model {m}"),
+                None => return self.layout(),
+            }
+        } else {
+            text
+        };
         self.remember(&text);
         // A ! command waits in purple too, and runs when its turn comes.
         if self.busy.is_some() {
