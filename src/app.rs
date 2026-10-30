@@ -152,6 +152,8 @@ pub struct App {
     ended: Option<String>,
     /// The fleet mailboxes deck watches, under gluon; else none.
     mail: Vec<PathBuf>,
+    /// Under gluon, where quitting deck ends gluon too.
+    hosted: bool,
     errors: String,
     status: String,
     input: Vec<char>,
@@ -249,6 +251,7 @@ pub fn start(arg: Option<&str>, dir: Option<&str>, mail: Option<&str>) -> Result
     let mut app = App::new(s, last, claude, tx, rx, errors);
     if let Some(tag) = mail {
         app.mail = watch_mail(tag);
+        app.hosted = true;
     }
     app.layout();
     // The key reader catches the wake-up signal only once it has started.
@@ -511,6 +514,7 @@ impl App {
             eta,
             ended: None,
             mail: Vec::new(),
+            hosted: false,
             errors,
             status: String::new(),
             input: Vec::new(),
@@ -909,7 +913,7 @@ impl App {
         // Quitting stops a Claude at work, and under gluon ends gluon too,
         // so a popup asks first.
         let working = self.busy.is_some() || self.claude.has_children();
-        if k == "C-D" && (working || !self.mail.is_empty()) {
+        if k == "C-D" && (working || self.hosted) {
             return self.sure_to_quit(working);
         }
         if let Some((id, _, input)) = self.asks.front().cloned() {
@@ -1106,7 +1110,7 @@ impl App {
 
     /// A popup before quitting: y quits, any other key stays.
     fn sure_to_quit(&mut self, working: bool) -> bool {
-        let what = if self.mail.is_empty() { "quit" } else { "quit gluon" };
+        let what = if self.hosted { "quit gluon" } else { "quit" };
         let q = if working {
             format!("Claude is still at work. Stop it and {what}?")
         } else {
