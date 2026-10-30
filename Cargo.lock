@@ -41,7 +41,7 @@ dependencies = [
 
 [[package]]
 name = "deck"
-version = "0.1.29"
+version = "0.1.30"
 dependencies = [
  "fe2o3-crust",
  "libc",

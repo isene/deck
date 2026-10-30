@@ -51,7 +51,7 @@ const KEYS: &[(&str, &str)] = &[
     ("C-B", "pick the answer pane's colour (prism)"),
     ("C-L", "draw the screen again"),
     ("C-?", "this help"),
-    ("C-D", "quit; asks y/n first while Claude or a command of its runs"),
+    ("C-D", "quit; a popup asks first while Claude or a command of its runs, and always under gluon"),
 ];
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -67,7 +67,6 @@ const WAIT: u8 = 141;
 /// An open ETA, in fleet's colour; RED once it has passed.
 const ETA: u8 = 220;
 /// C-D during a turn shows this first; a second C-D stops the turn and quits.
-const QUIT_WARN: &str = "Claude is still at work: stop it and quit? y/n";
 
 struct Tool {
     id: String,
@@ -906,16 +905,12 @@ impl App {
 
     /// True when the user quits.
     fn key(&mut self, k: &str) -> bool {
-        let armed = self.flash.as_deref() == Some(QUIT_WARN);
         self.flash = None;
-        // The question before quitting takes the next key: y, or C-D
-        // again, quits; any other key stays.
-        if armed {
-            return matches!(k, "y" | "Y" | "C-D");
-        }
-        if k == "C-D" && (self.busy.is_some() || self.claude.has_children()) {
-            self.flash = Some(QUIT_WARN.into());
-            return false;
+        // Quitting stops a Claude at work, and under gluon ends gluon too,
+        // so a popup asks first.
+        let working = self.busy.is_some() || self.claude.has_children();
+        if k == "C-D" && (working || !self.mail.is_empty()) {
+            return self.sure_to_quit(working);
         }
         if let Some((id, _, input)) = self.asks.front().cloned() {
             match k {
@@ -1107,6 +1102,24 @@ impl App {
             self.colour = hex;
         }
         self.layout();
+    }
+
+    /// A popup before quitting: y quits, any other key stays.
+    fn sure_to_quit(&mut self, working: bool) -> bool {
+        let what = if self.mail.is_empty() { "quit" } else { "quit gluon" };
+        let q = if working {
+            format!("Claude is still at work. Stop it and {what}?")
+        } else {
+            "Quit gluon?".to_string()
+        };
+        let hint = "y quits, any other key stays";
+        let w = crust::display_width(&q).max(hint.len()) as u16 + 2;
+        let mut pop = Popup::centered(w, 2, 231, 236);
+        pop.show(&format!(" {}\n {}", style::bold(&q), style::dim(hint)));
+        let yes = matches!(Input::getchr(None).as_deref(), Some("y" | "Y"));
+        self.over = true;
+        self.layout();
+        yes
     }
 
     /// The keys in a popup, as in the other Fe2O3 programs. Esc, q or Enter
