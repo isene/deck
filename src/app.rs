@@ -1351,7 +1351,7 @@ impl App {
             if !self.waiting.is_empty() {
                 st += &format!(" · {} waiting", self.waiting.len());
             }
-            style::fg(&st, AMBER) + &style::dim("   Esc stops")
+            style::fg(&st, AMBER)
         } else {
             style::fg("○ ready", GREEN)
         };
@@ -1367,11 +1367,8 @@ impl App {
         if let Some(f) = &self.flash {
             left += &style::dim(&format!(" · {f}"));
         }
-        let tools = if self.tab_line.is_some() { "^T" } else { "^O" };
-        let right = style::dim(&format!("PgUp/PgDn scroll · {tools} tools · ^Y copy · ^? help · ^D quit "));
-        let room = (self.bar.w as usize).saturating_sub(crust::display_width(&left) + crust::display_width(&right));
-        let text = if room > 0 { format!("{left}{}{right}", " ".repeat(room)) } else { left };
-        self.bar.set_text(&text);
+        // No key legend here; ^? lists the keys, as the first screen says.
+        self.bar.set_text(&left);
         self.bar.refresh();
     }
 
@@ -1501,9 +1498,9 @@ impl App {
             match &self.ended {
                 Some(e) => blocks.push(style::fg("Claude Code ended.", RED) + "\n" + &style::dim(e)),
                 None if blocks.is_empty() => blocks.push(style::dim(&if self.s.resume {
-                    format!("Session {}. Type below; Enter sends.", self.name())
+                    format!("Session {}. Type below; Enter sends, ^? shows the keys.", self.name())
                 } else {
-                    format!("New session in {}. Type below; Enter sends.", self.s.cwd)
+                    format!("New session in {}. Type below; Enter sends, ^? shows the keys.", self.s.cwd)
                 })),
                 None => {}
             }
