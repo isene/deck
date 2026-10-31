@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.37 (2026-10-31)
+
+- Under gluon, the top bar leaves out the session's name, which the
+  status line shows already.
 ## 0.1.36 (2026-10-31)
 
 - The bridge look writes the top bar's text in black on the bar's

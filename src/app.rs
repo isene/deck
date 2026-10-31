@@ -1484,7 +1484,8 @@ impl App {
             style::fg("○ ready", GREEN)
         };
         let mut left = match &self.tab_line {
-            Some(tabs) => format!("{tabs} {}  {}", style::fg(&self.name(), PURPLE), state),
+            // Under gluon the status line names the session already.
+            Some(tabs) => format!("{tabs} {state}"),
             None => format!(" {}  {}  {}", style::bold("deck"), style::fg(&self.name(), PURPLE), state),
         };
         if !self.eta.is_empty() && self.ended.is_none() {
