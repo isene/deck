@@ -24,6 +24,47 @@ pub fn on_bar(text: &str, bg: Rgb) -> String {
     style::rgb(text, Some((0, 0, 0)), Some(bg), "b")
 }
 
+/// A sidebar part: first row, rows, colour, label.
+pub type Part = (u16, u16, Rgb, Option<&'static str>);
+
+/// Rows at the foot of the state part for what Claude is doing.
+pub const STATE: u16 = 7;
+
+/// deck's buttons from row `from`: the session, the model, the context
+/// and the week's limit, up to three rows each, then the state part in
+/// colour `state` down to row `to`. A short screen drops the buttons that
+/// do not fit. deck writes their labels.
+pub fn info(from: u16, to: u16, state: Rgb) -> Vec<Part> {
+    let each = (to.saturating_sub(from + STATE) / 4).clamp(1, 3);
+    let mut v: Vec<Part> = [(LILAC, "tag"), (PERI, "model"), (PEACH, "ctx"), (SKY, "week")]
+        .into_iter()
+        .enumerate()
+        .map(|(i, (c, what))| (from + i as u16 * each, each, c, Some(what)))
+        .filter(|&(row, n, ..)| row + n <= to)
+        .collect();
+    let after = v.last().map_or(from, |&(row, n, ..)| row + n);
+    if to > after {
+        v.push((after, to - after, state, Some("state")));
+    }
+    v
+}
+
+/// The cells the sidebar's labels show through: a labelled part's last
+/// row, and the state part's last STATE rows.
+pub fn label_holes(parts: &[Part]) -> Vec<(u16, u16, u16)> {
+    parts
+        .iter()
+        .flat_map(|&(row, n, _, label)| {
+            let k = match label {
+                Some("state") => n.min(STATE),
+                Some(_) => 1,
+                None => 0,
+            };
+            (row + n - k..row + n).map(|r| (r, 0, SIDE))
+        })
+        .collect()
+}
+
 /// Everything the picture shows, in cells from 0. The same plan draws
 /// the same picture, so an unchanged plan sends nothing.
 #[derive(Clone, PartialEq, Debug, Default)]
@@ -36,7 +77,7 @@ pub struct Plan {
     /// which is text alone, so its minutes send no picture). The first
     /// part is the top corner, the last the bottom corner, and the one
     /// between with no label is where the bar at `mid` crosses.
-    pub parts: Vec<(u16, u16, Rgb, Option<&'static str>)>,
+    pub parts: Vec<Part>,
     /// The parts with the keys, which reach across the gap to their text.
     pub lit: Vec<usize>,
     /// A box's header bar: row, first column, columns, colour.

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.39 (2026-10-31)
+
+- Under gluon's bridge look, the session, model, context, week's limit
+  and state go on the sidebar beside Claude (`set_side`, with the parts
+  from `bridge::info`); the status line and the state in the top bar go.
+- `bridge::info` drops the buttons that do not fit on a short screen.
 ## 0.1.38 (2026-10-31)
 
 - Under gluon, a fleet message that landed while gluon was down is

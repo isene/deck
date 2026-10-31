@@ -193,6 +193,9 @@ pub struct App {
     /// The sidebar's labels as written, so they are written again only
     /// when they change.
     labels: String,
+    /// Under gluon's bridge look: the sidebar parts beside Claude that
+    /// deck labels (bridge::info).
+    side_parts: Option<Vec<bridge::Part>>,
     /// The widths of the note and the version in the top bar of the bridge
     /// look: the picture leaves them holes.
     spans: (u16, u16),
@@ -450,6 +453,16 @@ impl App {
         self.layout();
     }
 
+    /// Under gluon's bridge look: the sidebar parts beside Claude, which
+    /// deck labels with the session, model, context, week and state; the
+    /// status line and the state in the top bar go. None ends it.
+    pub fn set_side(&mut self, parts: Option<Vec<bridge::Part>>) {
+        if parts != self.side_parts {
+            self.side_parts = parts;
+            self.labels.clear();
+        }
+    }
+
     /// Under gluon's Home tab: the keys go to deck (true) or to one of
     /// Home's boxes; the bar shows the tab line set before.
     pub fn set_focus(&mut self, on: bool) {
@@ -561,6 +574,7 @@ impl App {
             foot: Pane::new(1, 1, 1, 1, 252, 0),
             bridge: None,
             labels: String::new(),
+            side_parts: None,
             spans: (0, 0),
         };
         for (prompt, answer) in last.turns {
@@ -885,7 +899,7 @@ impl App {
     fn run_status(&self) {
         // The bridge look shows the session, model, context and limit in
         // its sidebar instead.
-        if self.bridge.is_some() {
+        if self.bridge.is_some() || self.side_parts.is_some() {
             return;
         }
         let home = std::env::var("HOME").unwrap_or_default();
@@ -1431,8 +1445,8 @@ impl App {
         // A cleared screen wants the picture and the labels again.
         if let Some(b) = &mut self.bridge {
             b.forget();
-            self.labels.clear();
         }
+        self.labels.clear();
         print!("{}", seq::HIDE);
         if self.area.is_none() {
             Crust::clear_screen();
@@ -1487,11 +1501,13 @@ impl App {
             style::fg("○ ready", GREEN)
         };
         let mut left = match &self.tab_line {
+            // gluon's sidebar shows the state.
+            Some(tabs) if self.side_parts.is_some() => tabs.clone(),
             // Under gluon the status line names the session already.
             Some(tabs) => format!("{tabs} {state}"),
             None => format!(" {}  {}  {}", style::bold("deck"), style::fg(&self.name(), PURPLE), state),
         };
-        if !self.eta.is_empty() && self.ended.is_none() {
+        if !self.eta.is_empty() && self.ended.is_none() && self.side_parts.is_none() {
             let eta = if self.eta == "?" { "unknown" } else { &self.eta };
             let c = if session::late(&self.eta, &clock()) { RED } else { ETA };
             left += &style::fg(&format!(" · ETA {eta}"), c);
@@ -1502,6 +1518,30 @@ impl App {
         // No key legend here; ^? lists the keys, as the first screen says.
         self.bar.set_text(&left);
         self.bar.refresh();
+        self.paint_side();
+    }
+
+    /// Under gluon's bridge look: the labels on the sidebar beside Claude,
+    /// written when they changed. gluon draws the parts.
+    fn paint_side(&mut self) {
+        let Some(parts) = self.side_parts.as_deref().filter(|_| !self.hidden) else { return };
+        let labels = bridge_labels(parts, &self.side());
+        if labels != self.labels {
+            print!("{labels}");
+            self.labels = labels;
+            self.place_cursor();
+        }
+    }
+
+    /// What the bridge look's sidebar says now.
+    fn side(&self) -> Side {
+        Side {
+            tag: self.name().to_uppercase(),
+            model: model_name(&self.model).to_uppercase(),
+            ctx: context_label(self.context, self.window),
+            week: self.limits.map_or(String::new(), |l| format!("WEEK {:.0}%", l.1)),
+            state: self.state_lines(),
+        }
     }
 
     /// The top bar in the bridge look: a note after the corner while there
@@ -1564,14 +1604,7 @@ impl App {
         }
         let (cols, rows) = self.size;
         let plan = bridge_plan(cols, rows, self.rule.y - 1, self.spans);
-        let side = Side {
-            tag: self.name().to_uppercase(),
-            model: model_name(&self.model).to_uppercase(),
-            ctx: context_label(self.context, self.window),
-            week: self.limits.map_or(String::new(), |l| format!("WEEK {:.0}%", l.1)),
-            state: self.state_lines(),
-        };
-        let labels = bridge_labels(&plan, &side);
+        let labels = bridge_labels(&plan.parts, &self.side());
         let Some(b) = &mut self.bridge else { return };
         if b.show(plan) || labels != self.labels {
             print!("{labels}");
@@ -1591,9 +1624,11 @@ impl App {
             return self.place_cursor();
         }
         let old = self.old;
+        // gluon's sidebar has what the status line would say.
+        let status = if self.side_parts.is_some() { "" } else { &self.status };
         let version = if old { format!("deck v{VERSION} is old: restart ") } else { format!("deck v{VERSION} ") };
         let room = (self.foot.w as usize).saturating_sub(version.len() + 1);
-        let status = crust::truncate_ansi(&self.status, room);
+        let status = crust::truncate_ansi(status, room);
         let pad = " ".repeat((self.foot.w as usize).saturating_sub(version.len() + crust::display_width(&status)));
         // Amber when old, as in kastrup and tock.
         let version = if old { style::bold(&style::fg(&version, 208)) } else { style::dim(&version) };
@@ -2051,29 +2086,20 @@ fn bridge_file() -> PathBuf {
 /// Columns at the right end of the top bar that stay orange.
 const CAP: u16 = 3;
 
-/// Rows at the foot of the sidebar's red part for what Claude is doing.
-const STATE: u16 = 7;
-
 /// The bridge look for deck's screen, `cols` by `rows`: the top bar, the
 /// sidebar, the middle bar on the row above the prompt (`mid`, from 0) and
 /// the bottom bar. The top bar leaves holes for a note and the version,
 /// `spans` wide; the sidebar for its labels.
 fn bridge_plan(cols: u16, rows: u16, mid: u16, (note, version): (u16, u16)) -> bridge::Plan {
-    use bridge::{LILAC, ORANGE, PEACH, PERI, RED, SIDE, SKY};
+    use bridge::{ORANGE, PERI, RED, SIDE};
     let mut p = bridge::Plan { cols, rows, mid, ..bridge::Plan::default() };
     p.parts.push((0, 2, ORANGE, None));
-    // The session, the model, the context and the week's limit share what
-    // the corners and the state leave above the middle bar, up to three
-    // rows each.
-    let each = (mid.saturating_sub(4 + STATE) / 4).clamp(1, 3);
-    for (i, (c, what)) in [(LILAC, "tag"), (PERI, "model"), (PEACH, "ctx"), (SKY, "week")].into_iter().enumerate() {
-        p.parts.push((2 + i as u16 * each, each, c, Some(what)));
-    }
-    let after = 2 + 4 * each;
+    // The session, the model, the context, the week's limit and the state
+    // share what the corners leave above the middle bar.
+    let info = bridge::info(2, mid.saturating_sub(2), RED);
+    let after = info.last().map_or(2, |&(row, n, ..)| row + n);
+    p.parts.extend(info);
     let join = mid.saturating_sub(2).max(after);
-    if join > after {
-        p.parts.push((after, join - after, RED, Some("state")));
-    }
     let below = (mid + 2).max(join + 1);
     p.parts.push((join, below - join, ORANGE, None));
     let bottom = rows.saturating_sub(3).max(below);
@@ -2081,20 +2107,7 @@ fn bridge_plan(cols: u16, rows: u16, mid: u16, (note, version): (u16, u16)) -> b
         p.parts.push((below, bottom - below, PERI, Some("")));
     }
     p.parts.push((bottom, rows.saturating_sub(bottom), ORANGE, None));
-    // A button's label is on its last row, the state on the last rows of its part.
-    let labels: Vec<_> = p
-        .parts
-        .iter()
-        .flat_map(|&(row, n, _, label)| {
-            let k = match label {
-                Some("state") => n.min(STATE),
-                Some(_) => 1,
-                None => 0,
-            };
-            (row + n - k..row + n).map(|r| (r, 0, SIDE))
-        })
-        .collect();
-    p.holes = labels;
+    p.holes = bridge::label_holes(&p.parts);
     let x = SIDE + 1;
     p.holes.push((0, x, note.min(cols.saturating_sub(x + CAP + version))));
     p.holes.push((0, cols.saturating_sub(CAP + version), version));
@@ -2115,17 +2128,17 @@ struct Side {
 /// The sidebar's labels, black on their buttons, right-aligned: each
 /// button's on its last row, the state at the foot of the red part. A
 /// part without one is written blank in its colour.
-fn bridge_labels(p: &bridge::Plan, side: &Side) -> String {
+fn bridge_labels(parts: &[bridge::Part], side: &Side) -> String {
     let w = bridge::SIDE as usize - 1;
     let line = |row: u16, text: &str, c: bridge::Rgb| {
         let text: String = text.chars().take(w).collect();
         Cursor::at(1, row + 1) + &bridge::on_bar(&format!("{text:>w$} "), c)
     };
     let mut s = String::new();
-    for &(row, n, c, label) in &p.parts {
+    for &(row, n, c, label) in parts {
         match label {
             Some("state") => {
-                let k = n.min(STATE) as usize;
+                let k = n.min(bridge::STATE) as usize;
                 let lines = &side.state[..side.state.len().min(k)];
                 let blank = k - lines.len();
                 for i in 0..k {
@@ -2283,13 +2296,13 @@ mod tests {
             week: "WEEK 3%".into(),
             state: vec!["WORKING".into(), "0:16".into()],
         };
-        let labels = crust::strip_ansi(&bridge_labels(&plan, &side));
+        let labels = crust::strip_ansi(&bridge_labels(&plan.parts, &side));
         for want in ["     #FE2O3 ", "   103K 10% ", "    WEEK 3% ", "    WORKING ", "       0:16 "] {
             assert!(labels.contains(want), "{want:?} in {labels:?}");
         }
         // The state sits at the foot of the red part, right above the
         // curve into the middle bar (rows 42 and 43 are that curve).
-        assert!(bridge_labels(&plan, &side).contains(&(Cursor::at(1, 42) + &bridge::on_bar("       0:16 ", bridge::RED))));
+        assert!(bridge_labels(&plan.parts, &side).contains(&(Cursor::at(1, 42) + &bridge::on_bar("       0:16 ", bridge::RED))));
     }
 
     #[test]
