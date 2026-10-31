@@ -2,5 +2,6 @@
 //! program is `app::run`.
 
 pub mod app;
+pub mod bridge;
 mod claude;
 mod session;

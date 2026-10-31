@@ -4,7 +4,7 @@
 //! shown, with one line in the log saying so.
 
 use crate::claude::{Claude, Event, BUS, WAKE};
-use crate::{claude, session};
+use crate::{bridge, claude, session};
 use crust::{seq, style, Crust, Cursor, Input, Pane, Popup};
 use serde_json::{json, Value};
 use std::collections::VecDeque;
@@ -50,6 +50,7 @@ const KEYS: &[(&str, &str)] = &[
     ("C-S-Y", "copy what the answer pane shows"),
     ("C-W, C-S-W", "answer pane a tenth wider, narrower"),
     ("C-B", "pick the answer pane's colour (prism)"),
+    ("C-S-B", "the bridge look, in glass or kitty; it stays for the next start"),
     ("C-L", "draw the screen again"),
     ("C-?", "this help"),
     ("C-D", "quit; a popup asks first while Claude or a command of its runs, and always under gluon"),
@@ -186,6 +187,15 @@ pub struct App {
     gap: Option<Pane>,
     line: Pane,
     foot: Pane,
+    /// The bridge look (C-S-B), on deck's own screen while ~/.deck/bridge
+    /// exists; under gluon, gluon draws its own.
+    bridge: Option<bridge::Bridge>,
+    /// The sidebar's labels as written, so they are written again only
+    /// when they change.
+    labels: String,
+    /// The text's width in the top bar, and the status line's and the
+    /// version's in the bottom bar: the bridge picture leaves them holes.
+    spans: (u16, u16, u16),
 }
 
 /// The deck program: start, the main loop, finish.
@@ -256,6 +266,8 @@ pub fn start(arg: Option<&str>, dir: Option<&str>, mail: Option<&str>) -> Result
     if let Some(tag) = mail {
         app.mail = watch_mail(tag);
         app.hosted = true;
+    } else if bridge_file().exists() {
+        app.bridge = bridge::Bridge::new();
     }
     app.layout();
     // The key reader catches the wake-up signal only once it has started.
@@ -306,6 +318,9 @@ fn watch_mail(_: &str) -> Vec<PathBuf> {
 /// End Claude Code and give the terminal back.
 pub fn finish(mut app: App) {
     app.claude.stop(app.busy.is_some());
+    if let Some(b) = &mut app.bridge {
+        b.hide();
+    }
     Crust::disable_focus_reports();
     Crust::disable_modifier_keys();
     Crust::disable_bracketed_paste();
@@ -398,12 +413,12 @@ impl App {
         if self.busy.is_none() && self.quiet.is_some_and(|t| t.elapsed() >= self.park) {
             self.quiet = (!self.claude.pause()).then(Instant::now);
         }
-        self.draw_bar();
         // A rebuild shows at the next wake, not after the turn. Once old,
         // deck stays old, so the check stops.
         if !self.old && rebuilt() {
             self.draw_foot();
         }
+        self.draw_bar();
         self.place_cursor();
     }
 
@@ -541,6 +556,9 @@ impl App {
             rule: Pane::new(1, 1, 1, 1, 240, 0),
             blank: Pane::new(1, 1, 1, 1, 240, 0),
             foot: Pane::new(1, 1, 1, 1, 252, 0),
+            bridge: None,
+            labels: String::new(),
+            spans: (0, 0, 0),
         };
         for (prompt, answer) in last.turns {
             // A prompt with no answer had its turn cut short; a ! command needs none.
@@ -754,7 +772,7 @@ impl App {
     /// One question as a menu: its options, then "Type an answer". With
     /// several allowed, Enter ticks an option and "Done" sends the ticked.
     fn ask_one(&mut self, q: &Value) -> Option<String> {
-        self.over = true;
+        self.cover();
         let multi = q["multiSelect"].as_bool() == Some(true);
         let options: Vec<(String, String)> = q["options"]
             .as_array()
@@ -960,6 +978,7 @@ impl App {
             "C-Y" => self.copy_answer(),
             "C-S-Y" => self.copy_view(),
             "C-B" => self.pick_colour(),
+            "C-S-B" if !self.hosted => self.toggle_bridge(),
             "C-?" => self.show_help(),
             "C-J" | "S-ENTER" => {
                 self.input.insert(self.at, '\n');
@@ -1122,19 +1141,19 @@ impl App {
         };
         let hint = "y quits, any other key stays";
         let w = crust::display_width(&q).max(hint.len()) as u16 + 2;
+        self.cover();
         let mut pop = Popup::centered(w, 2, 231, 236);
         // No cursor while a popup is up; layout() puts it back after.
         print!("{}", seq::HIDE);
         pop.show(&format!(" {}\n {}", style::bold(&q), style::dim(hint)));
         let yes = matches!(Input::getchr(None).as_deref(), Some("y" | "Y"));
-        self.over = true;
         self.layout();
         yes
     }
 
     /// The models /model offers, with the bar on the one in use. Esc picks none.
     fn pick_model(&mut self) -> Option<String> {
-        self.over = true;
+        self.cover();
         let now = model_name(&self.model).split(' ').next().unwrap_or("").to_lowercase();
         let mut items = vec![format!(" {}", style::bold("Switch to")), String::new()];
         for m in MODELS {
@@ -1166,10 +1185,10 @@ impl App {
         let (cols, rows) = Crust::terminal_size();
         let w = t.lines().map(crust::display_width).max().unwrap_or(0) as u16 + 4;
         let h = t.lines().count() as u16;
+        self.cover();
         let mut pop = Popup::centered(w.min(cols.saturating_sub(4)), h.min(rows.saturating_sub(4)), 231, 236);
         print!("{}", seq::HIDE);
         pop.view(t);
-        self.over = true;
         self.layout();
     }
 
@@ -1192,7 +1211,7 @@ impl App {
     /// The terminal to a program, such as the editor or prism, until it
     /// quits.
     fn hand_over(&mut self, cmd: &mut Command) -> Option<i32> {
-        self.over = true;
+        self.cover();
         Crust::disable_focus_reports();
         Crust::disable_modifier_keys();
         Crust::disable_bracketed_paste();
@@ -1204,6 +1223,34 @@ impl App {
         Crust::enable_ctrl_shift_keys();
         Crust::enable_focus_reports();
         code
+    }
+
+    /// Something goes over the panes (a popup, the editor): gluon draws its
+    /// screen again after it, and the bridge picture, which would cover it,
+    /// is taken down until layout() puts it back.
+    fn cover(&mut self) {
+        self.over = true;
+        if let Some(b) = &mut self.bridge {
+            b.hide();
+        }
+    }
+
+    /// C-S-B: the bridge look on or off, kept for the next start.
+    fn toggle_bridge(&mut self) {
+        let file = bridge_file();
+        if let Some(mut b) = self.bridge.take() {
+            b.hide();
+            let _ = fs::remove_file(&file);
+            self.flash = Some("the bridge look is off".into());
+        } else if let Some(b) = bridge::Bridge::new() {
+            self.bridge = Some(b);
+            let _ = file.parent().map(fs::create_dir_all);
+            let _ = fs::write(&file, "");
+            self.flash = Some("the bridge look; C-S-B turns it off".into());
+        } else {
+            self.flash = Some("the bridge look needs a terminal that shows pictures, as glass or kitty".into());
+        }
+        self.layout();
     }
 
     /// Up and Down move between the prompt's rows, and past the first or
@@ -1334,7 +1381,9 @@ impl App {
     fn layout(&mut self) {
         let (cols, all) = Crust::terminal_size();
         self.size = (cols, all);
-        let (top, rows, left) = self.area.unwrap_or((0, all, 0));
+        // The bridge look keeps the sidebar and a column beside it.
+        let side = if self.bridge.is_some() { bridge::SIDE + 1 } else { 0 };
+        let (top, rows, left) = self.area.unwrap_or((0, all, side));
         let (x, cols) = (left + 1, cols.saturating_sub(left));
         self.rows = rows;
         let n = self.input_height(cols);
@@ -1344,7 +1393,9 @@ impl App {
             p.wrap = false;
             p.scroll = false;
         };
-        self.bar = Pane::new(x, top + 1, cols, 1, 255, 236);
+        // In the bridge look the bars are the picture's, with the text in holes.
+        let grey = if side > 0 { 0 } else { 236 };
+        self.bar = Pane::new(x, top + 1, cols, 1, 255, grey);
         one(&mut self.bar);
         // One blank column keeps the answer's scroll mark off the log.
         self.answer = Pane::new(x, top + 2, cols - sw - u16::from(sw > 0), h, 231, 0);
@@ -1366,8 +1417,13 @@ impl App {
         });
         self.input_panes(n);
         // Dark grey sets the status line apart from the answer pane above it.
-        self.foot = Pane::new(x, top + rows, cols, 1, 252, 236);
+        self.foot = Pane::new(x, top + rows, cols, 1, 252, grey);
         one(&mut self.foot);
+        // A cleared screen wants the picture and the labels again.
+        if let Some(b) = &mut self.bridge {
+            b.forget();
+            self.labels.clear();
+        }
         print!("{}", seq::HIDE);
         if self.area.is_none() {
             Crust::clear_screen();
@@ -1427,6 +1483,26 @@ impl App {
         // No key legend here; ^? lists the keys, as the first screen says.
         self.bar.set_text(&left);
         self.bar.refresh();
+        self.spans.0 = crust::display_width(&left) as u16;
+        self.paint_bridge();
+    }
+
+    /// The bridge picture, sent when what it shows changed, and the
+    /// sidebar's labels, written when they changed. draw_bar calls it
+    /// last, after draw_foot when both draw.
+    fn paint_bridge(&mut self) {
+        if self.bridge.is_none() {
+            return;
+        }
+        let (cols, rows) = self.size;
+        let plan = bridge_plan(cols, rows, self.rule.y - 1, self.spans);
+        let ctx = if self.window > 0 { format!("CTX {}%", self.context * 100 / self.window) } else { String::new() };
+        let labels = bridge_labels(&plan, &self.name().to_uppercase(), &model_name(&self.model).to_uppercase(), &ctx);
+        let Some(b) = &mut self.bridge else { return };
+        if b.show(plan) || labels != self.labels {
+            print!("{labels}");
+            self.labels = labels;
+        }
     }
 
     /// The status line, and deck's version at the right, as in the other
@@ -1435,9 +1511,14 @@ impl App {
         self.old = rebuilt();
         let old = self.old;
         let version = if old { format!("deck v{VERSION} is old: restart ") } else { format!("deck v{VERSION} ") };
-        let room = (self.foot.w as usize).saturating_sub(version.len() + 1);
+        // The bridge look keeps the bottom bar's rounded end clear.
+        let w = (self.foot.w as usize).saturating_sub(if self.bridge.is_some() { CAP as usize } else { 0 });
+        let room = w.saturating_sub(version.len() + 1);
         let status = crust::truncate_ansi(&self.status, room);
-        let pad = " ".repeat((self.foot.w as usize).saturating_sub(version.len() + crust::display_width(&status)));
+        let sw = crust::display_width(&status);
+        let pad = " ".repeat(w.saturating_sub(version.len() + sw));
+        self.spans.1 = sw as u16;
+        self.spans.2 = version.len() as u16;
         // Amber when old, as in kastrup and tock.
         let version = if old { style::bold(&style::fg(&version, 208)) } else { style::dim(&version) };
         self.foot.set_text(&format!("{status}{pad}{version}"));
@@ -1494,7 +1575,9 @@ impl App {
             p.wrap = false;
             p.scroll = false;
         }
-        self.rule.set_text(&"─".repeat(cols as usize));
+        // The bridge look has its middle bar on this row.
+        let line = if self.bridge.is_some() { "" } else { "─" };
+        self.rule.set_text(&line.repeat(cols as usize));
     }
 
     fn draw_line(&mut self) {
@@ -1884,6 +1967,77 @@ fn remember_window(model: &str, window: u64) {
 }
 
 /// "claude-opus-5-5" as "Opus 5.5".
+/// While this file exists, deck on its own starts in the bridge look.
+fn bridge_file() -> PathBuf {
+    PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".deck").join("bridge")
+}
+
+/// Columns at the right end of the top and bottom bars that stay orange.
+const CAP: u16 = 3;
+
+/// The bridge look for deck's screen, `cols` by `rows`: the top bar, the
+/// sidebar, the middle bar on the row above the prompt (`mid`, from 0) and
+/// the bottom bar. `spans` are the widths of the top bar's text, the
+/// status line and the version. A hole for text is rounded up to sixteen
+/// columns, so the picture goes again only when the text grows past that.
+fn bridge_plan(cols: u16, rows: u16, mid: u16, (bar, status, version): (u16, u16, u16)) -> bridge::Plan {
+    use bridge::{LILAC, ORANGE, PEACH, PERI, RED, SIDE, SKY};
+    let mut p = bridge::Plan { cols, rows, mid, ..bridge::Plan::default() };
+    p.parts.push((0, 2, ORANGE, None));
+    // The session, the model and the context share what the corners
+    // leave above the middle bar, up to three rows each.
+    let each = (mid.saturating_sub(4) / 3).clamp(1, 3);
+    for (i, (c, what)) in [(LILAC, "name"), (PERI, "model"), (PEACH, "ctx")].into_iter().enumerate() {
+        p.parts.push((2 + i as u16 * each, each, c, Some(what)));
+    }
+    let after = 2 + 3 * each;
+    let join = mid.saturating_sub(2).max(after);
+    if join > after {
+        p.parts.push((after, join - after, RED, Some("")));
+    }
+    let below = (mid + 2).max(join + 1);
+    p.parts.push((join, below - join, ORANGE, None));
+    let bottom = rows.saturating_sub(3).max(below);
+    if bottom > below {
+        p.parts.push((below, bottom - below, SKY, Some("")));
+    }
+    p.parts.push((bottom, rows.saturating_sub(bottom), ORANGE, None));
+    for (row, n, _, label) in &p.parts {
+        if label.is_some() {
+            p.holes.push((row + n - 1, 0, SIDE));
+        }
+    }
+    let x = SIDE + 1;
+    let up = |w: u16| w.div_ceil(16) * 16;
+    let last = rows.saturating_sub(1);
+    let vx = cols.saturating_sub(CAP + version);
+    p.holes.push((0, x, up(bar).min(cols.saturating_sub(x + CAP))));
+    p.holes.push((last, x, up(status).min(vx.saturating_sub(x))));
+    p.holes.push((last, vx, version));
+    p.holes.retain(|h| h.2 > 0);
+    p
+}
+
+/// The sidebar's labels, black on their buttons, right-aligned on each
+/// button's last row: the session's name, the model and how full the
+/// context is. A button without one is written blank in its colour.
+fn bridge_labels(p: &bridge::Plan, name: &str, model: &str, ctx: &str) -> String {
+    let w = bridge::SIDE as usize - 1;
+    let mut s = String::new();
+    for (row, rows, c, label) in &p.parts {
+        let text = match label {
+            Some("name") => name,
+            Some("model") => model,
+            Some("ctx") => ctx,
+            Some(_) => "",
+            None => continue,
+        };
+        let text: String = text.chars().take(w).collect();
+        s += &(Cursor::at(1, row + rows) + &style::rgb(&format!("{text:>w$} "), Some((0, 0, 0)), Some(*c), "b"));
+    }
+    s
+}
+
 fn model_name(id: &str) -> String {
     let rest = id.strip_prefix("claude-").unwrap_or(id);
     let mut parts = rest.split('-');
@@ -1978,6 +2132,30 @@ mod tests {
         let shown = crust::strip_ansi(&prompt_lines(&long));
         assert_eq!(shown.lines().count(), 11);
         assert!(shown.ends_with("… 2 more lines"));
+    }
+
+    #[test]
+    fn the_bridge_pieces_hold_all_its_colour() {
+        // A 174 by 48 screen, the prompt one row high: the middle bar on row 44.
+        let plan = bridge_plan(174, 48, 44, (40, 60, 13));
+        let c = bridge::picture(&plan, Some((11, 21)));
+        let pieces = bridge::pieces(&plan);
+        for y in 0..c.h {
+            for x in 0..c.w {
+                if c.rgba[(y * c.w + x) * 4 + 3] > 0 {
+                    let (row, col) = ((y / 21) as u16, (x / 11) as u16);
+                    let n = pieces.iter().filter(|q| row >= q.0 && row < q.0 + q.2 && col >= q.1 && col < q.1 + q.3).count();
+                    assert_eq!(n, 1, "pixel {x},{y} in {n} pieces");
+                }
+            }
+        }
+        // The text holes: the top bar's rounded up to 48, the status
+        // line's to 64, the version's exact, before the orange end.
+        assert!(plan.holes.contains(&(0, 13, 48)));
+        assert!(plan.holes.contains(&(47, 13, 64)));
+        assert!(plan.holes.contains(&(47, 158, 13)));
+        let labels = crust::strip_ansi(&bridge_labels(&plan, "FE2O3", "OPUS 5.5", "CTX 12%"));
+        assert!(labels.contains("      FE2O3 ") && labels.contains("CTX 12% "));
     }
 
     #[test]

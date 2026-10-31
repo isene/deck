@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.34 (2026-10-31)
+
+- The bridge look on deck's own screen: C-S-B draws an orange frame
+  around the panes, in the style of a starship's screens, with the
+  session, the model and the context on buttons in a sidebar. It needs
+  glass or kitty, and it stays on for the next start while
+  `~/.deck/bridge` exists. Under gluon, gluon draws its own.
+- The drawing code for the look moved here from gluon, which now uses
+  deck's. Off, it costs one stat() at start.
 ## 0.1.33 (2026-10-30)
 
 - Under gluon, deck can start some columns in from the left, so gluon's

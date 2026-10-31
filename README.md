@@ -67,6 +67,7 @@ deck <id>         open the session with this id
 | C-S-Y | copy what the answer pane shows, scrolled or not |
 | C-W, C-S-W | answer pane a tenth wider, narrower |
 | C-B | pick the answer pane's colour in `prism` |
+| C-S-B | the bridge look, in glass or kitty; it stays for the next start |
 | C-? | the keys in a popup |
 | y, n | answer a permission question |
 | C-L | draw the screen again |
