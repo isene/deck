@@ -85,6 +85,12 @@ pane shows each turn's `result`, which is the final text after any stop
 hook rewrite. When `~/.claude/hooks/hyperlist-display-asm` is installed
 and switched on, answers are drawn through it, as Claude Code does.
 
+While `~/.deck/matrix` exists, a new answer comes up as green glyphs
+that settle into its letters in under a second, the top lines a little
+first ([fx](https://github.com/isene/fx) switches it). It is skipped
+while another window or gluon tab is in front, and costs under 10 ms of
+CPU per answer. Off, it costs one look for the file per answer.
+
 Idle, deck uses no CPU: it waits on the keyboard, and the thread that reads
 Claude's output wakes it with a signal. While Claude works, the bar's clock
 wakes it once a second.

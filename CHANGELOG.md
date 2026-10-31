@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.40 (2026-10-31)
+
+- The Matrix decode: while `~/.deck/matrix` exists, a new answer comes
+  up as green glyphs that settle into its letters in 0.9 s. Skipped
+  while deck is out of sight.
 ## 0.1.39 (2026-10-31)
 
 - Under gluon's bridge look, the session, model, context, week's limit

@@ -595,6 +595,7 @@ impl App {
 
     fn drain(&mut self) {
         let (mut answer, mut log, mut status) = (false, false, false);
+        let mut fresh = false;
         while let Ok(e) = self.rx.try_recv() {
             match e {
                 Event::Init { session, model, version } => {
@@ -699,6 +700,7 @@ impl App {
                         t.answer = Some(text);
                         t.failed = failed;
                         t.drawn = None;
+                        fresh = !failed;
                     }
                     answer = true;
                     log = true;
@@ -743,6 +745,9 @@ impl App {
         }
         if answer || log {
             self.draw_line();
+        }
+        if fresh {
+            self.decode();
         }
         if self.asks.front().is_some_and(|a| a.1 == "AskUserQuestion") {
             self.ask_questions();
@@ -1776,6 +1781,37 @@ impl App {
         }
     }
 
+    /// The Matrix decode, while ~/.deck/matrix exists (fx switches it): a
+    /// new answer comes up as green glyphs that settle into its letters,
+    /// the top lines a little first, in under a second; keys typed meanwhile
+    /// wait for it. Off, or with nobody looking, it costs one stat() per
+    /// answer.
+    fn decode(&mut self) {
+        if self.hidden || self.away || self.detail || !matrix_file().exists() {
+            return;
+        }
+        let width = (self.answer.w as usize).saturating_sub(2);
+        let Some(body) = self.turns.last_mut().map(|t| drawn(t, width)) else { return };
+        let start = Instant::now();
+        let mut seed = now_ms() as u64 | 1;
+        loop {
+            let p = start.elapsed().as_secs_f32() / DECODE_S;
+            if p >= 1.0 {
+                break;
+            }
+            let frame = scramble(&body, p, &mut seed);
+            if let Some(t) = self.turns.last_mut() {
+                t.drawn = Some((width, frame));
+            }
+            self.fill_answer(false);
+            std::thread::sleep(Duration::from_millis(40));
+        }
+        if let Some(t) = self.turns.last_mut() {
+            t.drawn = Some((width, body));
+        }
+        self.fill_answer(false);
+    }
+
     fn fill_side(&mut self) {
         let Some(side) = self.side.as_mut() else { return };
         let mut lines = Vec::new();
@@ -2079,6 +2115,104 @@ fn remember_window(model: &str, window: u64) {
 
 /// "claude-opus-5-5" as "Opus 5.5".
 /// While this file exists, deck on its own starts in the bridge look.
+fn matrix_file() -> PathBuf {
+    PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".deck").join("matrix")
+}
+
+/// How long the Matrix decode takes, in seconds.
+const DECODE_S: f32 = 0.9;
+const GLYPHS: &[char] = &[
+    '0', '1', '2', '3', '4', '5', '7', '8', '9', 'Z', 'T', 'H', 'K', 'N', 'X', ':', '.', '=', '*', '+', '-', '<', '>',
+    '|', '¦', '"',
+];
+
+/// `text` (with its colours) at point `p` (0 to 1) of the Matrix decode:
+/// a letter not yet settled is a green glyph, new each frame, bright just
+/// before it settles. Spaces, lines and wide letters stay as they are, so
+/// nothing moves. Escape sequences pass through; after a run of glyphs
+/// the text's own colour comes back.
+fn scramble(text: &str, p: f32, seed: &mut u64) -> String {
+    let rows = text.lines().count().max(1) as f32;
+    let mut out = String::with_capacity(text.len() * 2);
+    let mut sgr = String::new(); // the colour the text is in now
+    let mut green = false;
+    let (mut row, mut col) = (0u32, 0u32);
+    let mut it = text.chars().peekable();
+    while let Some(c) = it.next() {
+        if c == '\x1b' {
+            let mut esc = String::from(c);
+            match it.next() {
+                Some('[') => {
+                    esc.push('[');
+                    for d in it.by_ref() {
+                        esc.push(d);
+                        if ('@'..='~').contains(&d) {
+                            break;
+                        }
+                    }
+                    if esc.ends_with('m') {
+                        if esc == "\x1b[0m" || esc == "\x1b[m" {
+                            sgr.clear();
+                        } else {
+                            sgr.push_str(&esc);
+                        }
+                    }
+                }
+                Some(']') => {
+                    esc.push(']');
+                    while let Some(d) = it.next() {
+                        esc.push(d);
+                        if d == '\x07' || (d == '\x1b' && it.peek() == Some(&'\\')) {
+                            if d == '\x1b' {
+                                esc.extend(it.next());
+                            }
+                            break;
+                        }
+                    }
+                }
+                Some(d) => esc.push(d),
+                None => {}
+            }
+            // A colour change under a run of glyphs waits until it ends.
+            if !(green && esc.ends_with('m')) {
+                out.push_str(&esc);
+            }
+            continue;
+        }
+        if c == '\n' {
+            (row, col) = (row + 1, 0);
+        } else {
+            col += 1;
+        }
+        // When this letter settles: a little later further down, the rest
+        // spread at random, the same each frame.
+        let h = (row.wrapping_mul(7919) ^ col.wrapping_mul(104_729)).wrapping_mul(2_654_435_761);
+        let at = 0.3 * row as f32 / rows + 0.65 * (h >> 8) as f32 / (1u32 << 24) as f32;
+        let mixed = p < at && (c.is_alphanumeric() || c.is_ascii_punctuation()) && (c as u32) < 0x1100;
+        if mixed {
+            *seed ^= *seed << 13;
+            *seed ^= *seed >> 7;
+            *seed ^= *seed << 17;
+            let g = GLYPHS[(*seed % GLYPHS.len() as u64) as usize];
+            let (r, gr, b) = if at - p < 0.08 { (190, 255, 200) } else { (0, 200, 70) };
+            out.push_str(&style::set_fg_rgb(r, gr, b));
+            out.push(g);
+            green = true;
+        } else {
+            if green {
+                out.push_str(style::RESET);
+                out.push_str(&sgr);
+                green = false;
+            }
+            out.push(c);
+        }
+    }
+    if green {
+        out.push_str(style::RESET);
+    }
+    out
+}
+
 fn bridge_file() -> PathBuf {
     PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".deck").join("bridge")
 }
@@ -2363,6 +2497,18 @@ mod tests {
         let seen = |m: &str, _: usize| Some(if m.contains("|---|") { "raw" } else { "drawn" }.to_string());
         assert_eq!(draw(md, 80, seen), "raw");
         assert!(draw(md, 80, |_, _| None).contains('│'));
+    }
+
+    #[test]
+    fn the_matrix_decode_keeps_every_line_in_place_and_ends_on_the_text() {
+        let text = render("**Bold** words and `code`\n\n- a list item, 42 %\n", 40);
+        let mut seed = 7;
+        assert_eq!(scramble(&text, 1.0, &mut seed), text);
+        let start = scramble(&text, 0.0, &mut seed);
+        let plain = |s: &str| crust::strip_ansi(s);
+        assert_ne!(plain(&start), plain(&text));
+        let widths = |s: &str| plain(s).lines().map(|l| (l.chars().count(), l.matches(' ').count())).collect::<Vec<_>>();
+        assert_eq!(widths(&start), widths(&text));
     }
 
     #[test]
