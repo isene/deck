@@ -50,7 +50,7 @@ const KEYS: &[(&str, &str)] = &[
     ("C-S-Y", "copy what the answer pane shows"),
     ("C-W, C-S-W", "answer pane a tenth wider, narrower"),
     ("C-B", "pick the answer pane's colour (prism)"),
-    ("C-S-B", "the bridge look, in glass or kitty; it stays for the next start"),
+    ("C-S-B", "the next look: plain, the bridge, the matrix (green in glass); it stays for the next start"),
     ("C-L", "draw the screen again"),
     ("C-?", "this help"),
     ("C-D", "quit; a popup asks first while Claude or a command of its runs, and always under gluon"),
@@ -190,6 +190,9 @@ pub struct App {
     /// The bridge look (C-S-B), on deck's own screen while ~/.deck/bridge
     /// exists; under gluon, gluon draws its own.
     bridge: Option<bridge::Bridge>,
+    /// The matrix look: the bridge in green through glass's tint, and the
+    /// Matrix decode on. Under gluon, gluon sets it.
+    pub matrix: bool,
     /// The sidebar's labels as written, so they are written again only
     /// when they change.
     labels: String,
@@ -256,6 +259,7 @@ pub fn start(arg: Option<&str>, dir: Option<&str>, mail: Option<&str>) -> Result
     std::panic::set_hook(Box::new(move |p| {
         Crust::disable_focus_reports();
         Crust::disable_modifier_keys();
+        print!("{}", style::tint_seq(None));
         Crust::cleanup();
         default_hook(p);
     }));
@@ -274,6 +278,10 @@ pub fn start(arg: Option<&str>, dir: Option<&str>, mail: Option<&str>) -> Result
         BUS.store(true, Ordering::SeqCst);
     } else if bridge_file().exists() {
         app.bridge = bridge::Bridge::new();
+        app.matrix = app.bridge.is_some() && bridge::is_matrix(&bridge_file());
+        if app.matrix {
+            print!("{}", style::tint_seq(Some(bridge::MATRIX)));
+        }
     }
     app.layout();
     // The key reader catches the wake-up signal only once it has started.
@@ -326,6 +334,9 @@ pub fn finish(mut app: App) {
     app.claude.stop(app.busy.is_some());
     if let Some(b) = &mut app.bridge {
         b.hide();
+    }
+    if app.matrix && !app.hosted {
+        print!("{}", style::tint_seq(None));
     }
     Crust::disable_focus_reports();
     Crust::disable_modifier_keys();
@@ -573,6 +584,7 @@ impl App {
             blank: Pane::new(1, 1, 1, 1, 240, 0),
             foot: Pane::new(1, 1, 1, 1, 252, 0),
             bridge: None,
+            matrix: false,
             labels: String::new(),
             side_parts: None,
             spans: (0, 0),
@@ -1005,7 +1017,7 @@ impl App {
             "C-Y" => self.copy_answer(),
             "C-S-Y" => self.copy_view(),
             "C-B" => self.pick_colour(),
-            "C-S-B" if !self.hosted => self.toggle_bridge(),
+            "C-S-B" if !self.hosted => self.cycle_look(),
             "C-?" => self.show_help(),
             "C-J" | "S-ENTER" => {
                 self.input.insert(self.at, '\n');
@@ -1262,19 +1274,33 @@ impl App {
         }
     }
 
-    /// C-S-B: the bridge look on or off, kept for the next start.
-    fn toggle_bridge(&mut self) {
+    /// C-S-B: the next look, kept for the next start. Plain, then the
+    /// bridge, then the matrix look (the bridge in green through glass's
+    /// tint, with the decode on), then plain again.
+    fn cycle_look(&mut self) {
         let file = bridge_file();
-        if let Some(mut b) = self.bridge.take() {
-            b.hide();
+        if self.matrix {
+            self.matrix = false;
+            print!("{}", style::tint_seq(None));
+            if let Some(mut b) = self.bridge.take() {
+                b.hide();
+            }
             let _ = fs::remove_file(&file);
-            self.flash = Some("the bridge look is off".into());
+            self.flash = Some("the plain look".into());
             self.run_status();
+        } else if let Some(mut b) = self.bridge.take() {
+            // The picture goes up again after the tint, so it is green too.
+            b.hide();
+            self.matrix = true;
+            print!("{}", style::tint_seq(Some(bridge::MATRIX)));
+            self.bridge = bridge::Bridge::new();
+            let _ = fs::write(&file, "matrix");
+            self.flash = Some("the matrix look (green in glass); C-S-B goes back to plain".into());
         } else if let Some(b) = bridge::Bridge::new() {
             self.bridge = Some(b);
             let _ = file.parent().map(fs::create_dir_all);
             let _ = fs::write(&file, "");
-            self.flash = Some("the bridge look; C-S-B turns it off".into());
+            self.flash = Some("the bridge look; C-S-B for the matrix look".into());
         } else {
             self.flash = Some("the bridge look needs a terminal that shows pictures, as glass or kitty".into());
         }
@@ -1781,13 +1807,14 @@ impl App {
         }
     }
 
-    /// The Matrix decode, while ~/.deck/matrix exists (fx switches it): a
+    /// The Matrix decode, while ~/.deck/matrix exists (fx switches it) or
+    /// the matrix look is on: a
     /// new answer comes up as green glyphs that settle into its letters,
     /// the top lines a little first, in under a second; keys typed meanwhile
     /// wait for it. Off, or with nobody looking, it costs one stat() per
     /// answer.
     fn decode(&mut self) {
-        if self.hidden || self.away || self.detail || !matrix_file().exists() {
+        if self.hidden || self.away || self.detail || !(self.matrix || matrix_file().exists()) {
             return;
         }
         let width = (self.answer.w as usize).saturating_sub(2);

@@ -14,6 +14,15 @@ pub const LILAC: Rgb = (204, 153, 204);
 pub const PERI: Rgb = (153, 153, 255);
 pub const RED: Rgb = (204, 102, 102);
 pub const SKY: Rgb = (153, 204, 255);
+/// The matrix look: the bridge and all the rest in this green, through
+/// glass's tint (crust::style::tint_seq).
+pub const MATRIX: Rgb = (0, 255, 65);
+
+/// True when a look file (~/.deck/bridge, ~/.gluon/bridge) asks for the
+/// matrix look rather than the plain bridge.
+pub fn is_matrix(file: &std::path::Path) -> bool {
+    std::fs::read_to_string(file).is_ok_and(|s| s.starts_with("matrix"))
+}
 
 /// The sidebar's width in columns.
 pub const SIDE: u16 = 12;
