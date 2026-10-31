@@ -193,9 +193,9 @@ pub struct App {
     /// The sidebar's labels as written, so they are written again only
     /// when they change.
     labels: String,
-    /// The text's width in the top bar, and the status line's and the
-    /// version's in the bottom bar: the bridge picture leaves them holes.
-    spans: (u16, u16, u16),
+    /// The widths of the note and the version in the top bar of the bridge
+    /// look: the picture leaves them holes.
+    spans: (u16, u16),
 }
 
 /// The deck program: start, the main loop, finish.
@@ -558,7 +558,7 @@ impl App {
             foot: Pane::new(1, 1, 1, 1, 252, 0),
             bridge: None,
             labels: String::new(),
-            spans: (0, 0, 0),
+            spans: (0, 0),
         };
         for (prompt, answer) in last.turns {
             // A prompt with no answer had its turn cut short; a ! command needs none.
@@ -880,6 +880,11 @@ impl App {
     /// The status line: the command in Claude Code's settings, fed what
     /// Claude Code would feed it. It runs after a turn, never on a timer.
     fn run_status(&self) {
+        // The bridge look shows the session, model, context and limit in
+        // its sidebar instead.
+        if self.bridge.is_some() {
+            return;
+        }
         let home = std::env::var("HOME").unwrap_or_default();
         let settings: Value = fs::read_to_string(format!("{home}/.claude/settings.json"))
             .ok()
@@ -1242,6 +1247,7 @@ impl App {
             b.hide();
             let _ = fs::remove_file(&file);
             self.flash = Some("the bridge look is off".into());
+            self.run_status();
         } else if let Some(b) = bridge::Bridge::new() {
             self.bridge = Some(b);
             let _ = file.parent().map(fs::create_dir_all);
@@ -1439,21 +1445,30 @@ impl App {
         self.place_cursor();
     }
 
+    /// The tool calls in the turn so far, and the one still running: the
+    /// step Claude is on, so a long quiet spell shows what it waits for.
+    fn turn_tools(&self) -> (usize, Option<&str>) {
+        let start = self.turns.last().map_or(0, |t| t.log_at);
+        let tools = self.log[start..].iter().filter(|l| matches!(l, Line::Tool(_))).count();
+        let running = self.log[start..].iter().rev().find_map(|l| match l {
+            Line::Tool(t) if t.failed.is_none() => Some(t.name.as_str()),
+            _ => None,
+        });
+        (tools, running)
+    }
+
     fn draw_bar(&mut self) {
+        if self.bridge.is_some() {
+            return self.draw_bridge_bar();
+        }
         let state = if self.ended.is_some() {
             style::fg("✗ Claude Code ended", RED)
         } else if !self.asks.is_empty() {
             style::fg("▲ waiting for your answer", AMBER)
         } else if let Some(t0) = self.busy {
             let s = t0.elapsed().as_secs();
-            let start = self.turns.last().map_or(0, |t| t.log_at);
-            let tools = self.log[start..].iter().filter(|l| matches!(l, Line::Tool(_))).count();
+            let (tools, running) = self.turn_tools();
             let mut st = format!("● working {}:{:02} · {} tool{}", s / 60, s % 60, tools, if tools == 1 { "" } else { "s" });
-            // The step it is on, so a long quiet spell shows what it waits for.
-            let running = self.log[start..].iter().rev().find_map(|l| match l {
-                Line::Tool(t) if t.failed.is_none() => Some(t.name.as_str()),
-                _ => None,
-            });
             let p = self.step.elapsed().as_secs();
             let step = running.unwrap_or("thinking");
             st += &format!(" · {step} {}:{:02}", p / 60, p % 60);
@@ -1483,8 +1498,57 @@ impl App {
         // No key legend here; ^? lists the keys, as the first screen says.
         self.bar.set_text(&left);
         self.bar.refresh();
-        self.spans.0 = crust::display_width(&left) as u16;
+    }
+
+    /// The top bar in the bridge look: a note after the corner while there
+    /// is one, and deck's version at the right. The rest is in the sidebar.
+    fn draw_bridge_bar(&mut self) {
+        let w = self.bar.w as usize;
+        let version = format!(" DECK {VERSION}{} ", if self.old { " RESTART" } else { "" });
+        let vw = version.len();
+        let note = self.flash.as_ref().map_or(String::new(), |f| format!(" {f} "));
+        let note = crust::truncate_ansi(&note, w.saturating_sub(vw + CAP as usize + 1));
+        let nw = crust::display_width(&note);
+        let pad = " ".repeat(w.saturating_sub(nw + vw + CAP as usize));
+        // Amber when old, as in the status line.
+        let vc = if self.old { (255, 135, 0) } else { bridge::PEACH };
+        let text = style::rgb(&note, Some(bridge::ORANGE), None, "") + &pad + &style::rgb(&version, Some(vc), None, "b");
+        self.bar.set_text(&text);
+        self.bar.refresh();
+        self.spans = (nw as u16, vw as u16);
         self.paint_bridge();
+    }
+
+    /// What Claude is doing, as short lines for the bridge look's sidebar.
+    fn state_lines(&self) -> Vec<String> {
+        let w = bridge::SIDE as usize - 1;
+        let time = |s: u64| format!("{}:{:02}", s / 60, s % 60);
+        let mut v: Vec<String> = Vec::new();
+        if self.ended.is_some() {
+            v.push("ENDED".into());
+        } else if !self.asks.is_empty() {
+            v.extend(["WAITING FOR".into(), "YOUR ANSWER".into()]);
+        } else if let Some(t0) = self.busy {
+            let (tools, running) = self.turn_tools();
+            let at = time(self.step.elapsed().as_secs());
+            let step: String = running.unwrap_or("think").chars().take(w - 1 - at.len()).collect();
+            v.push("WORKING".into());
+            v.push(time(t0.elapsed().as_secs()));
+            v.push(format!("{tools} TOOL{}", if tools == 1 { "" } else { "S" }));
+            v.push(format!("{} {at}", step.to_uppercase()));
+            if !self.pushed.is_empty() {
+                v.push(format!("{} SENT", self.pushed.len()));
+            }
+            if !self.waiting.is_empty() {
+                v.push(format!("{} WAITING", self.waiting.len()));
+            }
+        } else {
+            v.push("READY".into());
+        }
+        if !self.eta.is_empty() && self.ended.is_none() {
+            v.push(format!("ETA {}", self.eta));
+        }
+        v
     }
 
     /// The bridge picture, sent when what it shows changed, and the
@@ -1496,8 +1560,14 @@ impl App {
         }
         let (cols, rows) = self.size;
         let plan = bridge_plan(cols, rows, self.rule.y - 1, self.spans);
-        let ctx = if self.window > 0 { format!("CTX {}%", self.context * 100 / self.window) } else { String::new() };
-        let labels = bridge_labels(&plan, &self.name().to_uppercase(), &model_name(&self.model).to_uppercase(), &ctx);
+        let side = Side {
+            tag: self.name().to_uppercase(),
+            model: model_name(&self.model).to_uppercase(),
+            ctx: context_label(self.context, self.window),
+            week: self.limits.map_or(String::new(), |l| format!("WEEK {:.0}%", l.1)),
+            state: self.state_lines(),
+        };
+        let labels = bridge_labels(&plan, &side);
         let Some(b) = &mut self.bridge else { return };
         if b.show(plan) || labels != self.labels {
             print!("{labels}");
@@ -1509,16 +1579,18 @@ impl App {
     /// Fe2O3 programs.
     fn draw_foot(&mut self) {
         self.old = rebuilt();
+        // In the bridge look this row is the bottom bar; the version is in
+        // the top bar.
+        if self.bridge.is_some() {
+            self.foot.set_text("");
+            self.foot.refresh();
+            return self.place_cursor();
+        }
         let old = self.old;
         let version = if old { format!("deck v{VERSION} is old: restart ") } else { format!("deck v{VERSION} ") };
-        // The bridge look keeps the bottom bar's rounded end clear.
-        let w = (self.foot.w as usize).saturating_sub(if self.bridge.is_some() { CAP as usize } else { 0 });
-        let room = w.saturating_sub(version.len() + 1);
+        let room = (self.foot.w as usize).saturating_sub(version.len() + 1);
         let status = crust::truncate_ansi(&self.status, room);
-        let sw = crust::display_width(&status);
-        let pad = " ".repeat(w.saturating_sub(version.len() + sw));
-        self.spans.1 = sw as u16;
-        self.spans.2 = version.len() as u16;
+        let pad = " ".repeat((self.foot.w as usize).saturating_sub(version.len() + crust::display_width(&status)));
         // Amber when old, as in kastrup and tock.
         let version = if old { style::bold(&style::fg(&version, 208)) } else { style::dim(&version) };
         self.foot.set_text(&format!("{status}{pad}{version}"));
@@ -1972,70 +2044,116 @@ fn bridge_file() -> PathBuf {
     PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".deck").join("bridge")
 }
 
-/// Columns at the right end of the top and bottom bars that stay orange.
+/// Columns at the right end of the top bar that stay orange.
 const CAP: u16 = 3;
+
+/// Rows at the foot of the sidebar's red part for what Claude is doing.
+const STATE: u16 = 7;
 
 /// The bridge look for deck's screen, `cols` by `rows`: the top bar, the
 /// sidebar, the middle bar on the row above the prompt (`mid`, from 0) and
-/// the bottom bar. `spans` are the widths of the top bar's text, the
-/// status line and the version. A hole for text is rounded up to sixteen
-/// columns, so the picture goes again only when the text grows past that.
-fn bridge_plan(cols: u16, rows: u16, mid: u16, (bar, status, version): (u16, u16, u16)) -> bridge::Plan {
+/// the bottom bar. The top bar leaves holes for a note and the version,
+/// `spans` wide; the sidebar for its labels.
+fn bridge_plan(cols: u16, rows: u16, mid: u16, (note, version): (u16, u16)) -> bridge::Plan {
     use bridge::{LILAC, ORANGE, PEACH, PERI, RED, SIDE, SKY};
     let mut p = bridge::Plan { cols, rows, mid, ..bridge::Plan::default() };
     p.parts.push((0, 2, ORANGE, None));
-    // The session, the model and the context share what the corners
-    // leave above the middle bar, up to three rows each.
-    let each = (mid.saturating_sub(4) / 3).clamp(1, 3);
-    for (i, (c, what)) in [(LILAC, "name"), (PERI, "model"), (PEACH, "ctx")].into_iter().enumerate() {
+    // The session, the model, the context and the week's limit share what
+    // the corners and the state leave above the middle bar, up to three
+    // rows each.
+    let each = (mid.saturating_sub(4 + STATE) / 4).clamp(1, 3);
+    for (i, (c, what)) in [(LILAC, "tag"), (PERI, "model"), (PEACH, "ctx"), (SKY, "week")].into_iter().enumerate() {
         p.parts.push((2 + i as u16 * each, each, c, Some(what)));
     }
-    let after = 2 + 3 * each;
+    let after = 2 + 4 * each;
     let join = mid.saturating_sub(2).max(after);
     if join > after {
-        p.parts.push((after, join - after, RED, Some("")));
+        p.parts.push((after, join - after, RED, Some("state")));
     }
     let below = (mid + 2).max(join + 1);
     p.parts.push((join, below - join, ORANGE, None));
     let bottom = rows.saturating_sub(3).max(below);
     if bottom > below {
-        p.parts.push((below, bottom - below, SKY, Some("")));
+        p.parts.push((below, bottom - below, PERI, Some("")));
     }
     p.parts.push((bottom, rows.saturating_sub(bottom), ORANGE, None));
-    for (row, n, _, label) in &p.parts {
-        if label.is_some() {
-            p.holes.push((row + n - 1, 0, SIDE));
-        }
-    }
+    // A button's label is on its last row, the state on the last rows of its part.
+    let labels: Vec<_> = p
+        .parts
+        .iter()
+        .flat_map(|&(row, n, _, label)| {
+            let k = match label {
+                Some("state") => n.min(STATE),
+                Some(_) => 1,
+                None => 0,
+            };
+            (row + n - k..row + n).map(|r| (r, 0, SIDE))
+        })
+        .collect();
+    p.holes = labels;
     let x = SIDE + 1;
-    let up = |w: u16| w.div_ceil(16) * 16;
-    let last = rows.saturating_sub(1);
-    let vx = cols.saturating_sub(CAP + version);
-    p.holes.push((0, x, up(bar).min(cols.saturating_sub(x + CAP))));
-    p.holes.push((last, x, up(status).min(vx.saturating_sub(x))));
-    p.holes.push((last, vx, version));
+    p.holes.push((0, x, note.min(cols.saturating_sub(x + CAP + version))));
+    p.holes.push((0, cols.saturating_sub(CAP + version), version));
     p.holes.retain(|h| h.2 > 0);
     p
 }
 
-/// The sidebar's labels, black on their buttons, right-aligned on each
-/// button's last row: the session's name, the model and how full the
-/// context is. A button without one is written blank in its colour.
-fn bridge_labels(p: &bridge::Plan, name: &str, model: &str, ctx: &str) -> String {
+/// What the bridge look's sidebar says.
+struct Side {
+    tag: String,
+    model: String,
+    ctx: String,
+    week: String,
+    /// What Claude is doing, a line each.
+    state: Vec<String>,
+}
+
+/// The sidebar's labels, black on their buttons, right-aligned: each
+/// button's on its last row, the state at the foot of the red part. A
+/// part without one is written blank in its colour.
+fn bridge_labels(p: &bridge::Plan, side: &Side) -> String {
     let w = bridge::SIDE as usize - 1;
-    let mut s = String::new();
-    for (row, rows, c, label) in &p.parts {
-        let text = match label {
-            Some("name") => name,
-            Some("model") => model,
-            Some("ctx") => ctx,
-            Some(_) => "",
-            None => continue,
-        };
+    let line = |row: u16, text: &str, c: bridge::Rgb| {
         let text: String = text.chars().take(w).collect();
-        s += &(Cursor::at(1, row + rows) + &style::rgb(&format!("{text:>w$} "), Some((0, 0, 0)), Some(*c), "b"));
+        Cursor::at(1, row + 1) + &style::rgb(&format!("{text:>w$} "), Some((0, 0, 0)), Some(c), "b")
+    };
+    let mut s = String::new();
+    for &(row, n, c, label) in &p.parts {
+        match label {
+            Some("state") => {
+                let k = n.min(STATE) as usize;
+                let lines = &side.state[..side.state.len().min(k)];
+                let blank = k - lines.len();
+                for i in 0..k {
+                    let text = if i < blank { "" } else { &lines[i - blank] };
+                    s += &line(row + n - k as u16 + i as u16, text, c);
+                }
+            }
+            Some(key) => {
+                let text = match key {
+                    "tag" => &side.tag,
+                    "model" => &side.model,
+                    "ctx" => &side.ctx,
+                    "week" => &side.week,
+                    _ => "",
+                };
+                s += &line(row + n - 1, text, c);
+            }
+            None => {}
+        }
     }
     s
+}
+
+/// The context in use, in tokens and as a share of the window: "103K 10%".
+fn context_label(tokens: u64, window: u64) -> String {
+    let t = match tokens {
+        0 => return String::new(),
+        n if n >= 1_000_000 => format!("{}.{}M", n / 1_000_000, n % 1_000_000 / 100_000),
+        n if n >= 1000 => format!("{}K", n / 1000),
+        n => n.to_string(),
+    };
+    if window > 0 { format!("{t} {}%", tokens * 100 / window) } else { t }
 }
 
 fn model_name(id: &str) -> String {
@@ -2137,7 +2255,7 @@ mod tests {
     #[test]
     fn the_bridge_pieces_hold_all_its_colour() {
         // A 174 by 48 screen, the prompt one row high: the middle bar on row 44.
-        let plan = bridge_plan(174, 48, 44, (40, 60, 13));
+        let plan = bridge_plan(174, 48, 44, (8, 13));
         let c = bridge::picture(&plan, Some((11, 21)));
         let pieces = bridge::pieces(&plan);
         for y in 0..c.h {
@@ -2149,13 +2267,25 @@ mod tests {
                 }
             }
         }
-        // The text holes: the top bar's rounded up to 48, the status
-        // line's to 64, the version's exact, before the orange end.
-        assert!(plan.holes.contains(&(0, 13, 48)));
-        assert!(plan.holes.contains(&(47, 13, 64)));
-        assert!(plan.holes.contains(&(47, 158, 13)));
-        let labels = crust::strip_ansi(&bridge_labels(&plan, "FE2O3", "OPUS 5.5", "CTX 12%"));
-        assert!(labels.contains("      FE2O3 ") && labels.contains("CTX 12% "));
+        // The note after the corner, the version before the orange end;
+        // the bottom bar has no holes.
+        assert!(plan.holes.contains(&(0, 13, 8)));
+        assert!(plan.holes.contains(&(0, 158, 13)));
+        assert!(!plan.holes.iter().any(|h| h.0 == 47));
+        let side = Side {
+            tag: "#FE2O3".into(),
+            model: "OPUS 5.5".into(),
+            ctx: context_label(103_456, 1_000_000),
+            week: "WEEK 3%".into(),
+            state: vec!["WORKING".into(), "0:16".into()],
+        };
+        let labels = crust::strip_ansi(&bridge_labels(&plan, &side));
+        for want in ["     #FE2O3 ", "   103K 10% ", "    WEEK 3% ", "    WORKING ", "       0:16 "] {
+            assert!(labels.contains(want), "{want:?} in {labels:?}");
+        }
+        // The state sits at the foot of the red part, right above the
+        // curve into the middle bar (rows 42 and 43 are that curve).
+        assert!(bridge_labels(&plan, &side).contains(&(Cursor::at(1, 42) + &style::rgb("       0:16 ", Some((0, 0, 0)), Some(bridge::RED), "b"))));
     }
 
     #[test]

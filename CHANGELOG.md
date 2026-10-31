@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.35 (2026-10-31)
+
+- The bridge look moves the top bar's state and the status line into
+  the sidebar: the session, the model, the context, the week's limit,
+  and below them what Claude is doing (working, the time, the tools,
+  the step, the ETA). The top and bottom bars are whole again, with
+  deck's version at the right of the top one. The status line command
+  does not run in this look, which saves its forks after each turn.
 ## 0.1.34 (2026-10-31)
 
 - The bridge look on deck's own screen: C-S-B draws an orange frame
