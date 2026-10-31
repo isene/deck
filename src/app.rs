@@ -1510,9 +1510,9 @@ impl App {
         let note = crust::truncate_ansi(&note, w.saturating_sub(vw + CAP as usize + 1));
         let nw = crust::display_width(&note);
         let pad = " ".repeat(w.saturating_sub(nw + vw + CAP as usize));
-        // Amber when old, as in the status line.
-        let vc = if self.old { (255, 135, 0) } else { bridge::PEACH };
-        let text = style::rgb(&note, Some(bridge::ORANGE), None, "") + &pad + &style::rgb(&version, Some(vc), None, "b");
+        // Red when old.
+        let vc = if self.old { bridge::RED } else { bridge::ORANGE };
+        let text = bridge::on_bar(&note, bridge::ORANGE) + &pad + &bridge::on_bar(&version, vc);
         self.bar.set_text(&text);
         self.bar.refresh();
         self.spans = (nw as u16, vw as u16);
@@ -2115,7 +2115,7 @@ fn bridge_labels(p: &bridge::Plan, side: &Side) -> String {
     let w = bridge::SIDE as usize - 1;
     let line = |row: u16, text: &str, c: bridge::Rgb| {
         let text: String = text.chars().take(w).collect();
-        Cursor::at(1, row + 1) + &style::rgb(&format!("{text:>w$} "), Some((0, 0, 0)), Some(c), "b")
+        Cursor::at(1, row + 1) + &bridge::on_bar(&format!("{text:>w$} "), c)
     };
     let mut s = String::new();
     for &(row, n, c, label) in &p.parts {
@@ -2285,7 +2285,7 @@ mod tests {
         }
         // The state sits at the foot of the red part, right above the
         // curve into the middle bar (rows 42 and 43 are that curve).
-        assert!(bridge_labels(&plan, &side).contains(&(Cursor::at(1, 42) + &style::rgb("       0:16 ", Some((0, 0, 0)), Some(bridge::RED), "b"))));
+        assert!(bridge_labels(&plan, &side).contains(&(Cursor::at(1, 42) + &bridge::on_bar("       0:16 ", bridge::RED))));
     }
 
     #[test]

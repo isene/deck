@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.36 (2026-10-31)
+
+- The bridge look writes the top bar's text in black on the bar's
+  orange, so the bar stays whole under it (red when deck is old).
+  `bridge::on_bar` does this for gluon too.
 ## 0.1.35 (2026-10-31)
 
 - The bridge look moves the top bar's state and the status line into

@@ -4,6 +4,7 @@
 //! this runs; with it on, a picture goes out only when the plan changed.
 //! gluon's Home and deck on its own each make a plan; this draws it.
 
+use crust::style;
 use glow::{Canvas, Display};
 
 pub type Rgb = (u8, u8, u8);
@@ -16,6 +17,12 @@ pub const SKY: Rgb = (153, 204, 255);
 
 /// The sidebar's width in columns.
 pub const SIDE: u16 = 12;
+
+/// Text in black on a bar or button of colour `bg`. Written in a hole of
+/// the picture, it leaves the bar whole.
+pub fn on_bar(text: &str, bg: Rgb) -> String {
+    style::rgb(text, Some((0, 0, 0)), Some(bg), "b")
+}
 
 /// Everything the picture shows, in cells from 0. The same plan draws
 /// the same picture, so an unchanged plan sends nothing.
