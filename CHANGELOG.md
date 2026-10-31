@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.38 (2026-10-31)
+
+- Under gluon, a fleet message that landed while gluon was down is
+  asked for at start, as one landing later would be.
 ## 0.1.37 (2026-10-31)
 
 - Under gluon, the top bar leaves out the session's name, which the

@@ -266,6 +266,9 @@ pub fn start(arg: Option<&str>, dir: Option<&str>, mail: Option<&str>) -> Result
     if let Some(tag) = mail {
         app.mail = watch_mail(tag);
         app.hosted = true;
+        // A message that landed while deck was down is asked for at the
+        // first wait, as one landing now would be.
+        BUS.store(true, Ordering::SeqCst);
     } else if bridge_file().exists() {
         app.bridge = bridge::Bridge::new();
     }
