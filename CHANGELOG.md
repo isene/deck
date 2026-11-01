@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.42 (2026-11-01)
+
+- Under gluon's bridge look, the line above the prompt is the light blue
+  of the CLAUDE part while deck has the keys, in place of light green.
 ## 0.1.40 (2026-10-31)
 
 - The Matrix decode: while `~/.deck/matrix` exists, a new answer comes

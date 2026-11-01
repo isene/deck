@@ -471,6 +471,7 @@ impl App {
         if parts != self.side_parts {
             self.side_parts = parts;
             self.labels.clear();
+            self.recolour_rule();
         }
     }
 
@@ -478,19 +479,28 @@ impl App {
     /// Home's boxes; the bar shows the tab line set before.
     pub fn set_focus(&mut self, on: bool) {
         self.focus = on;
+        self.recolour_rule();
+        self.draw_bar();
+        self.place_cursor();
+    }
+
+    fn recolour_rule(&mut self) {
         let c = self.rule_colour();
         if self.rule.fg != c {
             self.rule.fg = c;
             self.rule.full_refresh();
         }
-        self.draw_bar();
-        self.place_cursor();
     }
 
     /// Light green above the prompt while deck has the keys under gluon,
-    /// as gluon draws the frame of the box that has them.
+    /// as gluon draws the frame of the box that has them; under the bridge
+    /// look the light blue of its CLAUDE part (bridge::SKY, near 153).
     fn rule_colour(&self) -> u16 {
-        if self.focus && self.tab_line.is_some() { 156 } else { 240 }
+        match (self.focus && self.tab_line.is_some(), self.side_parts.is_some()) {
+            (false, _) => 240,
+            (true, false) => 156,
+            (true, true) => 153,
+        }
     }
 
     /// True once after deck drew outside its area.
