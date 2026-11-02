@@ -25,7 +25,7 @@ user@host ~/src/myproject [Opus 5.5 high] [12%] ...
 - When an answer gave an ETA for work that goes on after it, the top bar
   shows it as fleet's ETA column does ("○ ready · ETA 16:30"), and in
   red once that time has passed.
-- When Claude goes idle, glass dims deck's window to half brightness
+- When Claude goes idle, glass dims deck's window to 20% brightness
   until you press a key in it, so the sessions that wait for you stand
   out (glass v0.3.102 on frame v0.1.56; Alt+d dims or lifts it by hand).
   It lifts by itself when Claude works again. Under gluon it is off.
