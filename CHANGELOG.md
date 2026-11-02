@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.43 (2026-11-02)
+
+- Fix: under gluon's bridge look, a stray light-blue "─" stayed left of
+  the prompt. 0.1.42 drew the line above the prompt in `set_side`, before
+  gluon gave deck its new area; it is drawn in `set_focus` alone again.
 ## 0.1.42 (2026-11-01)
 
 - Under gluon's bridge look, the line above the prompt is the light blue

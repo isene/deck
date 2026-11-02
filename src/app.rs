@@ -471,25 +471,22 @@ impl App {
         if parts != self.side_parts {
             self.side_parts = parts;
             self.labels.clear();
-            self.recolour_rule();
         }
     }
 
     /// Under gluon's Home tab: the keys go to deck (true) or to one of
-    /// Home's boxes; the bar shows the tab line set before.
+    /// Home's boxes; the bar shows the tab line set before. gluon calls it
+    /// after set_side and set_area, so the line above the prompt is drawn
+    /// here in its new colour, where the new layout put it.
     pub fn set_focus(&mut self, on: bool) {
         self.focus = on;
-        self.recolour_rule();
-        self.draw_bar();
-        self.place_cursor();
-    }
-
-    fn recolour_rule(&mut self) {
         let c = self.rule_colour();
         if self.rule.fg != c {
             self.rule.fg = c;
             self.rule.full_refresh();
         }
+        self.draw_bar();
+        self.place_cursor();
     }
 
     /// Light green above the prompt while deck has the keys under gluon,
