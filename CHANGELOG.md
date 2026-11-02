@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.44 (2026-11-02)
+
+- When Claude goes idle, glass dims deck's window to half brightness
+  until a key is pressed in it (`crust::style::dim_seq`, OSC 7702). It
+  lifts when Claude works again. Off under gluon, which shows every tab
+  in one glass.
 ## 0.1.43 (2026-11-02)
 
 - Fix: under gluon's bridge look, a stray light-blue "─" stayed left of

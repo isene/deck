@@ -734,6 +734,12 @@ impl App {
                             self.send(next);
                         }
                     }
+                    // Idle now: glass dims this window until a key is pressed in
+                    // it, so the sessions that wait for you stand out. Under
+                    // gluon one glass shows every tab, so it stays as it is.
+                    if self.busy.is_none() && !self.hosted {
+                        print!("{}", style::dim_seq(true));
+                    }
                 }
                 Event::Status(s) => {
                     self.status = s;
@@ -912,6 +918,9 @@ impl App {
         }
         self.turns.push(Turn { prompt: text, answer: None, failed: false, log_at: self.log.len(), drawn: None });
         self.busy = Some(Instant::now());
+        if !self.hosted {
+            print!("{}", style::dim_seq(false));
+        }
         self.step = Instant::now();
         self.detail = false;
         self.fill_answer(true);
