@@ -5,6 +5,7 @@ use serde_json::Value;
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::PathBuf;
+use std::time::Duration;
 
 pub struct Session {
     pub id: String,
@@ -375,10 +376,23 @@ fn unquoted(line: &str) -> String {
         .collect()
 }
 
-/// Whether this session dims its glass when a turn ends, as fleet's `i`
-/// and `I` keys set it in ~/.fleetrc. On unless told otherwise.
-pub fn dims(tag: Option<&str>) -> bool {
-    dims_in(&fs::read_to_string(home().join(".fleetrc")).unwrap_or_default(), tag)
+/// How long after a turn this session dims its glass: once fleet would
+/// call it idle (`idle_mins` in ~/.fleetrc, 30 by default). None when
+/// fleet's `i` and `I` keys turned the dim off there.
+pub fn dim_after(tag: Option<&str>) -> Option<Duration> {
+    let rc = fs::read_to_string(home().join(".fleetrc")).unwrap_or_default();
+    dims_in(&rc, tag).then(|| Duration::from_secs(idle_in(&rc) * 60))
+}
+
+/// fleet's `idle_mins N`: a session quiet this many minutes is idle.
+fn idle_in(rc: &str) -> u64 {
+    rc.lines()
+        .filter_map(|l| match l.split('#').next()?.split_whitespace().collect::<Vec<_>>().as_slice() {
+            ["idle_mins", n] => n.parse().ok(),
+            _ => None,
+        })
+        .last()
+        .unwrap_or(30)
 }
 
 /// `dim off` turns it off for all sessions; `dim <tag> on|off` sets one.
@@ -407,6 +421,8 @@ mod tests {
         assert!(!dims_in("dim ci off  # quiet one\n", Some("ci")));
         assert!(dims_in("dim pf off\n", Some("ci")));
         assert!(!dims_in("dim off\ndim ci on\n", None));
+        assert_eq!(idle_in(""), 30);
+        assert_eq!(idle_in("recent_days 7\nidle_mins 45  # after lunch\n"), 45);
     }
 
     #[test]

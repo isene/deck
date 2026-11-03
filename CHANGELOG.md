@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.46 (2026-11-03)
+
+- The glass dims once the session is idle as fleet counts it
+  (`idle_mins` in `~/.fleetrc`, 30 by default, after the turn ends),
+  no longer the moment a turn ends. A session that has just answered
+  (YOURS) stays bright. Cost: one more wake per turn, at that time.
+
 ## 0.1.45 (2026-11-03)
 
 - The idle dim follows fleet's `i` (one session) and `I` (all) keys:

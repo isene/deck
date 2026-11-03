@@ -143,6 +143,9 @@ pub struct App {
     quiet: Option<Instant>,
     /// How long idle before Claude is paused: DECK_PARK seconds, else 600.
     park: Duration,
+    /// When the glass dims: once fleet would call the session idle. None
+    /// while Claude works, once dimmed, or with the dim off.
+    dim_at: Option<Instant>,
     /// When the step Claude is on began: a tool call, its end, or a note.
     step: Instant,
     /// deck was built again since it started; the foot says so.
@@ -389,11 +392,16 @@ impl App {
     /// once to pause an idle Claude. Hidden under gluon, the bar is not on
     /// screen, so Claude's output alone wakes it while it works.
     pub fn before_wait(&self) -> u64 {
-        match (self.busy, self.quiet) {
+        let wait = match (self.busy, self.quiet) {
             (Some(_), _) if self.hidden => 86400,
             (Some(_), _) => 1,
             (None, Some(t)) => self.park.saturating_sub(t.elapsed()).as_secs().max(1),
             (None, None) => 86400,
+        };
+        // Once more, when the glass dims.
+        match self.dim_at {
+            Some(t) => wait.min(t.saturating_duration_since(Instant::now()).as_secs().max(1)),
+            None => wait,
         }
     }
 
@@ -429,6 +437,12 @@ impl App {
         // stays awake, and is asked again after the same wait.
         if self.busy.is_none() && self.quiet.is_some_and(|t| t.elapsed() >= self.park) {
             self.quiet = (!self.claude.pause()).then(Instant::now);
+        }
+        // Idle as fleet counts it: glass dims this window until a key is
+        // pressed in it, once per quiet spell.
+        if self.busy.is_none() && self.dim_at.is_some_and(|t| Instant::now() >= t) {
+            self.dim_at = None;
+            print!("{}", style::dim_seq(true));
         }
         // A rebuild shows at the next wake, not after the turn. Once old,
         // deck stays old, so the check stops.
@@ -562,6 +576,7 @@ impl App {
             busy: None,
             quiet: Some(Instant::now()),
             park: Duration::from_secs(std::env::var("DECK_PARK").ok().and_then(|v| v.parse().ok()).unwrap_or(600)),
+            dim_at: None,
             step: Instant::now(),
             old: false,
             eta,
@@ -734,15 +749,15 @@ impl App {
                             self.send(next);
                         }
                     }
-                    // Idle now: glass dims this window until a key is pressed in
-                    // it, so the sessions that wait for you stand out. Under
-                    // gluon one glass shows every tab, so it stays as it is.
-                    // fleet's i and I keys switch it off in ~/.fleetrc.
-                    if self.busy.is_none() && !self.hosted
-                        && session::dims(self.s.tags.first().map(String::as_str))
-                    {
-                        print!("{}", style::dim_seq(true));
-                    }
+                    // The glass dims once fleet would call the session idle, not
+                    // when it turns YOURS: a session that waits for you stays
+                    // bright. Under gluon one glass shows every tab, so it stays
+                    // as it is. fleet's i and I keys switch it off in ~/.fleetrc.
+                    self.dim_at = if self.busy.is_none() && !self.hosted {
+                        session::dim_after(self.s.tags.first().map(String::as_str)).map(|d| Instant::now() + d)
+                    } else {
+                        None
+                    };
                 }
                 Event::Status(s) => {
                     self.status = s;
@@ -921,6 +936,7 @@ impl App {
         }
         self.turns.push(Turn { prompt: text, answer: None, failed: false, log_at: self.log.len(), drawn: None });
         self.busy = Some(Instant::now());
+        self.dim_at = None;
         if !self.hosted {
             print!("{}", style::dim_seq(false));
         }
