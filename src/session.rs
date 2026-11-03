@@ -378,7 +378,7 @@ fn unquoted(line: &str) -> String {
 
 /// How long after a turn this session dims its glass: once fleet would
 /// call it idle (`idle_mins` in ~/.fleetrc, 30 by default). None when
-/// fleet's `i` and `I` keys turned the dim off there.
+/// fleet's `D` and Ctrl-D keys turned the dim off there.
 pub fn dim_after(tag: Option<&str>) -> Option<Duration> {
     let rc = fs::read_to_string(home().join(".fleetrc")).unwrap_or_default();
     dims_in(&rc, tag).then(|| Duration::from_secs(idle_in(&rc) * 60))

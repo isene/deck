@@ -752,7 +752,7 @@ impl App {
                     // The glass dims once fleet would call the session idle, not
                     // when it turns YOURS: a session that waits for you stays
                     // bright. Under gluon one glass shows every tab, so it stays
-                    // as it is. fleet's i and I keys switch it off in ~/.fleetrc.
+                    // as it is. fleet's D and Ctrl-D keys switch it off in ~/.fleetrc.
                     self.dim_at = if self.busy.is_none() && !self.hosted {
                         session::dim_after(self.s.tags.first().map(String::as_str)).map(|d| Instant::now() + d)
                     } else {

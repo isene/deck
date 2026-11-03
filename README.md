@@ -30,8 +30,8 @@ user@host ~/src/myproject [Opus 5.5 high] [12%] ...
   window to 20% brightness until you press a key in it. A session that
   has just answered (YOURS) stays bright (glass v0.3.102 on frame
   v0.1.56; Alt+d dims or lifts it by hand). It lifts by itself when
-  Claude works again. Under gluon it is off. fleet's `i` key switches it
-  for one session and `I` for all; deck reads `~/.fleetrc` when a turn
+  Claude works again. Under gluon it is off. fleet's `D` key switches it
+  for one session and Ctrl-D for all; deck reads `~/.fleetrc` when a turn
   ends.
 - The bottom row runs the `statusLine` command from Claude Code's
   settings, after each turn, with deck's version at the right.
