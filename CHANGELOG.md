@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.45 (2026-11-03)
+
+- The idle dim follows fleet's `i` (one session) and `I` (all) keys:
+  deck reads the `dim` lines in `~/.fleetrc` when a turn ends.
+
 ## 0.1.44 (2026-11-02)
 
 - When Claude goes idle, glass dims deck's window to half brightness

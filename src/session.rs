@@ -375,9 +375,39 @@ fn unquoted(line: &str) -> String {
         .collect()
 }
 
+/// Whether this session dims its glass when a turn ends, as fleet's `i`
+/// and `I` keys set it in ~/.fleetrc. On unless told otherwise.
+pub fn dims(tag: Option<&str>) -> bool {
+    dims_in(&fs::read_to_string(home().join(".fleetrc")).unwrap_or_default(), tag)
+}
+
+/// `dim off` turns it off for all sessions; `dim <tag> on|off` sets one.
+fn dims_in(rc: &str, tag: Option<&str>) -> bool {
+    let (mut all, mut own) = (true, None);
+    for line in rc.lines() {
+        let f: Vec<&str> = line.split('#').next().unwrap_or("").split_whitespace().collect();
+        match f.as_slice() {
+            ["dim", v] => all = *v != "off",
+            ["dim", t, v] if Some(*t) == tag => own = Some(*v != "off"),
+            _ => {}
+        }
+    }
+    own.unwrap_or(all)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_session_dims_as_fleetrc_says() {
+        assert!(dims_in("", Some("ci")));
+        assert!(!dims_in("dim off\n", Some("ci")));
+        assert!(dims_in("dim off\ndim ci on\n", Some("ci")));
+        assert!(!dims_in("dim ci off  # quiet one\n", Some("ci")));
+        assert!(dims_in("dim pf off\n", Some("ci")));
+        assert!(!dims_in("dim off\ndim ci on\n", None));
+    }
 
     #[test]
     fn the_eta_is_read_as_fleet_reads_it() {

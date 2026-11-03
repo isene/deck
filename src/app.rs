@@ -737,7 +737,10 @@ impl App {
                     // Idle now: glass dims this window until a key is pressed in
                     // it, so the sessions that wait for you stand out. Under
                     // gluon one glass shows every tab, so it stays as it is.
-                    if self.busy.is_none() && !self.hosted {
+                    // fleet's i and I keys switch it off in ~/.fleetrc.
+                    if self.busy.is_none() && !self.hosted
+                        && session::dims(self.s.tags.first().map(String::as_str))
+                    {
                         print!("{}", style::dim_seq(true));
                     }
                 }
