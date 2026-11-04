@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.47 (2026-11-04)
+
+- Under gluon's bridge look the top bar shows the ETA too, after
+  "▸ Claude", not only the sidebar. No new reads: deck still takes the
+  ETA once per answer.
+
 ## 0.1.46 (2026-11-03)
 
 - The glass dims once the session is idle as fleet counts it

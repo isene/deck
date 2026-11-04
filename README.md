@@ -24,7 +24,7 @@ user@host ~/src/myproject [Opus 5.5 high] [12%] ...
   log line says what the hook found.
 - When an answer gave an ETA for work that goes on after it, the top bar
   shows it as fleet's ETA column does ("○ ready · ETA 16:30"), and in
-  red once that time has passed.
+  red once that time has passed. Under gluon it follows "▸ Claude".
 - When the session goes idle as fleet counts it (`idle_mins` in
   `~/.fleetrc`, 30 by default, after the turn ends), glass dims deck's
   window to 20% brightness until you press a key in it. A session that

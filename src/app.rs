@@ -1573,7 +1573,8 @@ impl App {
             Some(tabs) => format!("{tabs} {state}"),
             None => format!(" {}  {}  {}", style::bold("deck"), style::fg(&self.name(), PURPLE), state),
         };
-        if !self.eta.is_empty() && self.ended.is_none() && self.side_parts.is_none() {
+        // Under gluon's bridge look too, after "▸ Claude", besides the sidebar.
+        if !self.eta.is_empty() && self.ended.is_none() {
             let eta = if self.eta == "?" { "unknown" } else { &self.eta };
             let c = if session::late(&self.eta, &clock()) { RED } else { ETA };
             left += &style::fg(&format!(" · ETA {eta}"), c);
