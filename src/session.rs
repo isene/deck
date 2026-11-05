@@ -278,6 +278,8 @@ pub fn last_in<'a>(lines: impl Iterator<Item = &'a str>) -> Last {
                         .join("\n"),
                     _ => continue,
                 };
+                // fleet's wake with the messages in it shows only the messages.
+                let text = crate::claude::mail(&text).unwrap_or(text);
                 // A ! command, sent alone or, before 0.1.9, ahead of a prompt.
                 let t = match text.trim().strip_prefix("<bash-input>") {
                     Some(rest) => match rest.rsplit_once("</bash-stdout>").map_or("", |(_, p)| p.trim()) {

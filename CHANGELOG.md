@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.52 (2026-11-05)
+
+- fleet's wake shows only the messages it brought, without the "Check
+  fleet messages" line above them, live and when a session is opened
+  again.
+- Under gluon, the bottom row says "deck vX is old: rebuild gluon" once
+  deck was built after the gluon that runs it. gluon 0.20.17 ran deck
+  0.1.49 after 0.1.51 was out, and nothing said so.
+
 ## 0.1.51 (2026-11-05)
 
 - When fleet wakes a session with "Check fleet messages", deck reads the

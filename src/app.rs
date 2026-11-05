@@ -425,6 +425,23 @@ fn rebuilt() -> bool {
     fs::read_link("/proc/self/exe").is_ok_and(|p| p.to_string_lossy().ends_with(" (deleted)"))
 }
 
+/// Under gluon: true once deck was built after the gluon that runs it, so
+/// the deck inside gluon is older than the one on disk. The deck on PATH
+/// is looked up once; then two stats per draw of the bottom row.
+fn behind_deck() -> bool {
+    static DECK: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    let deck = DECK.get_or_init(|| {
+        std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).map(|d| d.join("deck")).find(|p| p.is_file())
+    });
+    deck.as_deref().is_some_and(|d| newer(d, Path::new("/proc/self/exe")))
+}
+
+/// True when `a` was written after `b`.
+fn newer(a: &Path, b: &Path) -> bool {
+    let time = |p: &Path| fs::metadata(p).and_then(|m| m.modified()).ok();
+    time(a).zip(time(b)).is_some_and(|(a, b)| a > b)
+}
+
 impl App {
     /// One turn of the main loop is `before_wait`, a wait of at most the
     /// seconds it gives for a key, then `after_wait` with the key or None.
@@ -954,7 +971,7 @@ impl App {
         }
         let list = mail.iter().map(|m| format!("- {m}")).collect::<Vec<_>>().join("\n");
         self.claude.say(&format!("{seen}{} (from other local sessions or the fleet TUI):\n{list}", claude::MAIL));
-        self.start(format!("{text}\n{list}"));
+        self.start(list);
     }
 
     /// C-Enter: the purple prompts go to Claude now. It reads them at its
@@ -1734,8 +1751,9 @@ impl App {
     /// The status line, and deck's version at the right, as in the other
     /// Fe2O3 programs.
     fn draw_foot(&mut self) {
-        // Under gluon the binary is gluon's, so gluon says it is old.
-        self.old = !self.hosted && rebuilt();
+        // Under gluon the binary is gluon's: a rebuilt gluon says so itself,
+        // and deck says when deck was rebuilt after it.
+        self.old = if self.hosted { !rebuilt() && behind_deck() } else { rebuilt() };
         // In the bridge look this row is the bottom bar; the version is in
         // the top bar.
         if self.bridge.is_some() {
@@ -1746,7 +1764,8 @@ impl App {
         let old = self.old;
         // gluon's sidebar has what the status line would say.
         let status = if self.side_parts.is_some() { "" } else { &self.status };
-        let version = if old { format!("deck v{VERSION} is old: restart ") } else { format!("deck v{VERSION} ") };
+        let fix = if self.hosted { "rebuild gluon" } else { "restart" };
+        let version = if old { format!("deck v{VERSION} is old: {fix} ") } else { format!("deck v{VERSION} ") };
         let room = (self.foot.w as usize).saturating_sub(version.len() + 1);
         let status = crust::truncate_ansi(status, room);
         let pad = " ".repeat((self.foot.w as usize).saturating_sub(version.len() + crust::display_width(&status)));
@@ -2607,6 +2626,19 @@ mod tests {
         assert_eq!(fs::read_to_string(fleet.join("log")).unwrap().lines().count(), 2);
         assert!(take_mail(&fleet, &["fw"]).is_empty());
         fs::remove_dir_all(&fleet).unwrap();
+    }
+
+    #[test]
+    fn a_deck_built_after_gluon_is_newer() {
+        let dir = std::env::temp_dir().join(format!("deck-newer-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let (gluon, deck) = (dir.join("gluon"), dir.join("deck"));
+        let t = std::time::SystemTime::now();
+        fs::File::create(&gluon).unwrap().set_modified(t - Duration::from_secs(60)).unwrap();
+        fs::File::create(&deck).unwrap().set_modified(t).unwrap();
+        assert!(newer(&deck, &gluon) && !newer(&gluon, &deck));
+        assert!(!newer(&dir.join("none"), &gluon));
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
