@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 use std::collections::VecDeque;
 use std::fs;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -340,6 +340,40 @@ fn watch_mail(_: &str) -> Vec<PathBuf> {
     Vec::new()
 }
 
+/// The messages in the mailboxes of `addrs`, oldest first, taken as fleet's
+/// bus hook takes them: deleted, and logged where fleet shows them. A phone
+/// message with a ! line stays for the hook, which runs it only when it is
+/// one of the session's open moves.
+fn take_mail(fleet: &Path, addrs: &[&str]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut log = String::new();
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    for root in ["bus", "relay"] {
+        for addr in addrs {
+            let Ok(dir) = fs::read_dir(fleet.join(root).join(addr)) else { continue };
+            let mut files: Vec<PathBuf> = dir.flatten().map(|e| e.path()).collect();
+            files.sort();
+            for f in files {
+                let Ok(text) = fs::read_to_string(&f) else { continue };
+                let text = text.trim();
+                if root == "relay" && text.lines().any(|l| l.trim().starts_with('!')) {
+                    continue;
+                }
+                if fs::remove_file(&f).is_err() || text.is_empty() {
+                    continue;
+                }
+                let line: String = text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(120).collect();
+                log.push_str(&format!("{now}\t{addr}\t{line}\n"));
+                out.push(text.to_string());
+            }
+        }
+    }
+    if !log.is_empty() {
+        let _ = fs::OpenOptions::new().append(true).create(true).open(fleet.join("log")).and_then(|mut f| f.write_all(log.as_bytes()));
+    }
+    out
+}
+
 /// End Claude Code and give the terminal back.
 pub fn finish(mut app: App) {
     app.claude.stop(app.busy.is_some());
@@ -438,8 +472,7 @@ impl App {
             && BUS.swap(false, Ordering::SeqCst)
             && self.mail.iter().any(|d| fs::read_dir(d).is_ok_and(|mut f| f.next().is_some()))
         {
-            self.claude.say(WAKE_PROMPT);
-            self.start(WAKE_PROMPT.to_string());
+            self.send(WAKE_PROMPT.to_string());
         }
         // Idle long enough: pause Claude. With a job of its own running it
         // stays awake, and is asked again after the same wait.
@@ -909,8 +942,19 @@ impl App {
             return self.shell(cmd.trim());
         }
         let seen = std::mem::take(&mut self.seen);
-        self.claude.say(&format!("{seen}{text}"));
-        self.start(text);
+        // fleet's wake: the messages go in the prompt itself. A model can
+        // skip what the bus hook adds beside a prompt (Kimi did, three
+        // times on 2026-11-05), and a compaction drops it.
+        let home = PathBuf::from(std::env::var("HOME").unwrap_or_default());
+        let addrs: Vec<&str> = std::iter::once(self.s.id.as_str()).chain(self.s.tags.iter().map(String::as_str)).collect();
+        let mail = if text == WAKE_PROMPT { take_mail(&home.join(".fleet"), &addrs) } else { Vec::new() };
+        if mail.is_empty() {
+            self.claude.say(&format!("{seen}{text}"));
+            return self.start(text);
+        }
+        let list = mail.iter().map(|m| format!("- {m}")).collect::<Vec<_>>().join("\n");
+        self.claude.say(&format!("{seen}{} (from other local sessions or the fleet TUI):\n{list}", claude::MAIL));
+        self.start(format!("{text}\n{list}"));
     }
 
     /// C-Enter: the purple prompts go to Claude now. It reads them at its
@@ -2548,6 +2592,21 @@ mod tests {
         assert_eq!(linked.matches(&format!("\x1b]8;;{url}\x1b\\")).count(), 2);
         assert!(linked.contains(&style::hyperlink("https://a.com/x", "https://a.com/x")));
         assert!(linked.contains(&style::hyperlink("https://b.org", "https://b.org")));
+    }
+
+    #[test]
+    fn mail_is_taken_but_a_phone_command_waits_for_the_hook() {
+        let fleet = std::env::temp_dir().join(format!("deck-mail-{}", std::process::id()));
+        for (dir, name, text) in [("bus/fw", "1", "read the brief\n"), ("relay/fw", "2", "! rm -rf x"), ("relay/fw", "3", "hi"), ("bus/other", "4", "not yours")] {
+            fs::create_dir_all(fleet.join(dir)).unwrap();
+            fs::write(fleet.join(dir).join(name), text).unwrap();
+        }
+        assert_eq!(take_mail(&fleet, &["id", "fw"]), vec!["read the brief", "hi"]);
+        assert!(fleet.join("relay/fw/2").exists() && fleet.join("bus/other/4").exists());
+        assert!(!fleet.join("bus/fw/1").exists());
+        assert_eq!(fs::read_to_string(fleet.join("log")).unwrap().lines().count(), 2);
+        assert!(take_mail(&fleet, &["fw"]).is_empty());
+        fs::remove_dir_all(&fleet).unwrap();
     }
 
     #[test]

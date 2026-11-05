@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.51 (2026-11-05)
+
+- When fleet wakes a session with "Check fleet messages", deck reads the
+  mailbox itself and sends the messages as the prompt. Kimi skipped the
+  same text when fleet's hook added it beside the prompt, and a
+  compaction drops it there. A phone message with a ! line is left for
+  the hook, which checks it against the session's open moves.
+
 ## 0.1.50 (2026-11-05)
 
 - `deck --new <tag>` starts a new session in the current directory and
