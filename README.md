@@ -53,6 +53,7 @@ user@host ~/src/myproject [Opus 5.5 high] [12%] ...
 ```
 deck              start a new session in this directory
 deck <tag>        open the session with this bookmark tag (from cc-sessions)
+deck --new <tag>  start a new session in this directory, under this tag
 deck <id>         open the session with this id
 ```
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.50 (2026-11-05)
+
+- `deck --new <tag>` starts a new session in the current directory and
+  writes its bookmark at once, so the session signs with that tag from
+  its first turn. A tag another session has is refused. fleet's `+`
+  starts new sessions this way.
+
 ## 0.1.49 (2026-11-05)
 
 - Every URL in an answer is a link (OSC 8). A URL too long for one row,

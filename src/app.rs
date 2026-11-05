@@ -21,6 +21,7 @@ const USAGE: &str = "deck: a paned front for Claude Code
 Usage:
   deck              start a new session in this directory
   deck <tag>        open the session with this bookmark tag
+  deck --new <tag>  start a new session in this directory, under this tag
   deck <id>         open the session with this id
 
 Keys:
@@ -218,7 +219,11 @@ pub fn run() {
         Some("-v" | "--version") => return println!("deck {VERSION}"),
         _ => {}
     }
-    let mut app = start(args.first().map(String::as_str), None, None).unwrap_or_else(|e| quit(&e));
+    let opened = match (args.first().map(String::as_str), args.get(1)) {
+        (Some("-n" | "--new"), Some(tag)) => session::new_tagged(tag).and_then(|s| open(s, None, None)),
+        (arg, _) => start(arg, None, None),
+    };
+    let mut app = opened.unwrap_or_else(|e| quit(&e));
     while app.running {
         let wait = app.before_wait();
         let key = Input::getchr(Some(wait));
@@ -232,7 +237,10 @@ pub fn run() {
 /// screen. With `mail`, a bookmark tag, deck asks Claude to read each
 /// fleet message for that tag as it lands (gluon does this).
 pub fn start(arg: Option<&str>, dir: Option<&str>, mail: Option<&str>) -> Result<App, String> {
-    let mut s = session::find(arg)?;
+    open(session::find(arg)?, dir, mail)
+}
+
+fn open(mut s: session::Session, dir: Option<&str>, mail: Option<&str>) -> Result<App, String> {
     if s.resume {
         if let Some(pid) = session::open_elsewhere(&s.id) {
             return Err(format!("That session is open in Claude Code already (pid {pid}). Close it there first."));

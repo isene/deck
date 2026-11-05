@@ -67,6 +67,45 @@ fn new_id() -> String {
     format!("{}-{}-{}-{}-{}", &h[0..8], &h[8..12], &h[12..16], &h[16..20], &h[20..])
 }
 
+/// The id of the bookmark that carries `tag`.
+fn owner(b: &Value, tag: &str) -> Option<String> {
+    b["sessions"]
+        .as_object()?
+        .iter()
+        .find(|(_, e)| e["tags"].as_array().is_some_and(|a| a.iter().any(|t| t.as_str() == Some(tag))))
+        .map(|(id, _)| id.clone())
+}
+
+/// A new session in the current directory under the bookmark tag `tag`,
+/// which no other session may carry. The bookmark is written now, so the
+/// session signs with its tag from the first turn and fleet lists it by
+/// name (fleet's + starts sessions this way).
+pub fn new_tagged(tag: &str) -> Result<Session, String> {
+    let tag = tag.trim_start_matches('#');
+    if tag.is_empty() || tag.contains(char::is_whitespace) {
+        return Err("A tag is one word.".into());
+    }
+    let mut b = bookmarks();
+    if owner(&b, tag).is_some() {
+        return Err(format!("A session has the tag {tag} already."));
+    }
+    let here = std::env::current_dir().map(|p| p.display().to_string()).unwrap_or_default();
+    let id = new_id();
+    add_bookmark(&mut b, &id, &here, tag);
+    let path = home().join(".cc-sessions/bookmarks.json");
+    let tmp = path.with_extension("deck");
+    let text = serde_json::to_string_pretty(&b).map_err(|e| e.to_string())? + "\n";
+    fs::write(&tmp, text).and_then(|_| fs::rename(&tmp, &path)).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(Session { id, cwd: here, tags: vec![tag.to_string()], resume: false })
+}
+
+fn add_bookmark(b: &mut Value, id: &str, path: &str, tag: &str) {
+    if !b.is_object() {
+        *b = serde_json::json!({"version": 2, "sessions": {}});
+    }
+    b["sessions"][id] = serde_json::json!({"path": path, "tags": [tag]});
+}
+
 /// The session `arg` names, or a new one in the current directory.
 pub fn find(arg: Option<&str>) -> Result<Session, String> {
     let here = std::env::current_dir().map(|p| p.display().to_string()).unwrap_or_default();
@@ -78,13 +117,7 @@ pub fn find(arg: Option<&str>) -> Result<Session, String> {
     let id = if looks_like_id(arg) {
         arg.to_string()
     } else {
-        b["sessions"]
-            .as_object()
-            .and_then(|m| m.iter().find(|(_, e)| {
-                e["tags"].as_array().is_some_and(|a| a.iter().any(|t| t.as_str() == Some(tag)))
-            }))
-            .map(|(id, _)| id.clone())
-            .ok_or(format!("No session has the tag {tag}."))?
+        owner(&b, tag).ok_or(format!("No session has the tag {tag}."))?
     };
     if transcript(&id).is_none() {
         return Err(format!("No transcript for session {id}."));
@@ -412,6 +445,18 @@ fn dims_in(rc: &str, tag: Option<&str>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_new_bookmark_is_found_by_its_tag() {
+        let mut b = Value::Null;
+        add_bookmark(&mut b, "id-1", "/tmp", "pf");
+        assert_eq!(b["version"], 2);
+        assert_eq!(owner(&b, "pf").as_deref(), Some("id-1"));
+        add_bookmark(&mut b, "id-2", "/home", "ci");
+        assert_eq!(owner(&b, "ci").as_deref(), Some("id-2"));
+        assert_eq!(owner(&b, "pf").as_deref(), Some("id-1"));
+        assert_eq!(owner(&b, "nobody"), None);
+    }
 
     #[test]
     fn a_session_dims_as_fleetrc_says() {
