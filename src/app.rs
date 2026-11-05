@@ -2392,6 +2392,7 @@ fn render(md: &str, width: usize) -> String {
 /// The HyperList hook turns a table into Items itself, so it gets the
 /// markdown as written. Lines drawn first came back wrapped as Items.
 fn draw(md: &str, width: usize, hl: fn(&str, usize) -> Option<String>) -> String {
+    let src = md;
     let md = hl(md, width).unwrap_or_else(|| crust::text::format_markdown_tables(md, width));
     let mut out = Vec::new();
     let mut code = false;
@@ -2409,7 +2410,81 @@ fn draw(md: &str, width: usize, hl: fn(&str, usize) -> Option<String>) -> String
             out.push(inline(line));
         }
     }
-    out.join("\n")
+    link_urls(&out.join("\n"), src)
+}
+
+/// Each URL in `text` as an OSC 8 link, so glass opens all of it from any
+/// of its rows. The HyperList hook cuts a URL longer than the width over
+/// rows: a URL that ends its row goes on at the start of the next one when
+/// `src` has the two parts as one URL.
+fn link_urls(text: &str, src: &str) -> String {
+    let lines: Vec<&str> = text.split('\n').collect();
+    let mut links: Vec<Vec<(usize, usize, String)>> = vec![Vec::new(); lines.len()];
+    let (mut i, mut from) = (0, 0);
+    while i < lines.len() {
+        let Some(p) = find_url(lines[i], from) else {
+            (i, from) = (i + 1, 0);
+            continue;
+        };
+        let mut parts = vec![(i, p, url_end(lines[i], p))];
+        let mut url = lines[i][p..parts[0].2].to_string();
+        while let Some(&(l, _, e)) = parts.last() {
+            let Some(next) = lines.get(l + 1).filter(|_| e == lines[l].len()) else { break };
+            let s = next.len() - next.trim_start_matches(' ').len();
+            let n = url_end(next, s);
+            if n == s || !src.contains(&format!("{url}{}", &next[s..n])) {
+                break;
+            }
+            url.push_str(&next[s..n]);
+            parts.push((l + 1, s, n));
+        }
+        // A comma or full stop right after a URL belongs to the sentence.
+        let cut = url.len() - url.trim_end_matches([',', '.', ';', ':', '!', '?']).len();
+        url.truncate(url.len() - cut);
+        let last = parts.last_mut().unwrap();
+        last.2 -= cut.min(last.2 - last.1);
+        let (end_line, end) = (last.0, last.2);
+        for &(l, s, e) in &parts {
+            if e > s {
+                links[l].push((s, e, url.clone()));
+            }
+        }
+        (i, from) = (end_line, end.max(p + 1));
+    }
+    let linked: Vec<String> = lines
+        .iter()
+        .zip(links)
+        .map(|(line, ls)| {
+            let mut out = String::new();
+            let mut at = 0;
+            for (s, e, url) in ls {
+                out.push_str(&line[at..s]);
+                out.push_str(&style::hyperlink(&url, &line[s..e]));
+                at = e;
+            }
+            out.push_str(&line[at..]);
+            out
+        })
+        .collect();
+    linked.join("\n")
+}
+
+/// Where the next http:// or https:// URL in `s` starts, from byte `from`.
+fn find_url(s: &str, from: usize) -> Option<usize> {
+    let mut at = from;
+    while let Some(i) = s[at..].find("http") {
+        let p = at + i;
+        if s[p..].starts_with("https://") || s[p..].starts_with("http://") {
+            return Some(p);
+        }
+        at = p + 4;
+    }
+    None
+}
+
+/// Where the URL characters that start at byte `from` of `s` stop.
+fn url_end(s: &str, from: usize) -> usize {
+    s[from..].find(|c: char| c.is_whitespace() || "\x1b)]>\"'`".contains(c)).map_or(s.len(), |i| from + i)
 }
 
 /// `code` and **bold** inside a line.
@@ -2450,6 +2525,22 @@ fn hyperlist(md: &str, width: usize) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The HyperList hook's rows for the source in the test below.
+    fn cut_rows(_: &str, _: usize) -> Option<String> {
+        Some("See\n  https://example.com/a/very/long/path/t\n  hat/goes/on/and/on/index.html for it.\n  Then https://a.com/x, and\nhttps://b.org\nnext".into())
+    }
+
+    #[test]
+    fn a_url_the_hook_cut_over_rows_is_one_link() {
+        let url = "https://example.com/a/very/long/path/that/goes/on/and/on/index.html";
+        let src = format!("See {url} for it. Then https://a.com/x, and\nhttps://b.org\nnext");
+        let linked = draw(&src, 40, cut_rows);
+        assert_eq!(crust::strip_ansi(&linked), cut_rows("", 0).unwrap());
+        assert_eq!(linked.matches(&format!("\x1b]8;;{url}\x1b\\")).count(), 2);
+        assert!(linked.contains(&style::hyperlink("https://a.com/x", "https://a.com/x")));
+        assert!(linked.contains(&style::hyperlink("https://b.org", "https://b.org")));
+    }
 
     #[test]
     fn a_long_command_output_shows_its_last_lines() {

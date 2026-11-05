@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.49 (2026-11-05)
+
+- Every URL in an answer is a link (OSC 8). A URL too long for one row,
+  which the HyperList hook cuts over several rows, is one link: in glass
+  0.3.105 the pointer on any of its rows underlines all of them, and a
+  click opens the whole URL.
+
 ## 0.1.48 (2026-11-05)
 
 - Under gluon, deck no longer says "deck is old: restart" after a
