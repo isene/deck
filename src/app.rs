@@ -445,8 +445,8 @@ impl App {
             print!("{}", style::dim_seq(true));
         }
         // A rebuild shows at the next wake, not after the turn. Once old,
-        // deck stays old, so the check stops.
-        if !self.old && rebuilt() {
+        // deck stays old, so the check stops; under gluon it never runs.
+        if !self.hosted && !self.old && rebuilt() {
             self.draw_foot();
         }
         self.draw_bar();
@@ -1682,7 +1682,8 @@ impl App {
     /// The status line, and deck's version at the right, as in the other
     /// Fe2O3 programs.
     fn draw_foot(&mut self) {
-        self.old = rebuilt();
+        // Under gluon the binary is gluon's, so gluon says it is old.
+        self.old = !self.hosted && rebuilt();
         // In the bridge look this row is the bottom bar; the version is in
         // the top bar.
         if self.bridge.is_some() {

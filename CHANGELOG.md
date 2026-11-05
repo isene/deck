@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.48 (2026-11-05)
+
+- Under gluon, deck no longer says "deck is old: restart" after a
+  rebuild, and makes no check for one. The binary is gluon's, so gluon
+  marks its own version.
+
 ## 0.1.47 (2026-11-04)
 
 - Under gluon's bridge look the top bar shows the ETA too, after
