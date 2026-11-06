@@ -39,6 +39,7 @@ const KEYS: &[(&str, &str)] = &[
     ("Up, Down", "the row above or below, else earlier prompts that start as typed"),
     ("! command", "run it in a shell; Claude reads what it printed and answers"),
     ("/model", "pick the model in a popup; /model sonnet switches at once"),
+    ("/effort", "pick how hard Claude thinks in a popup; /effort high sets it at once"),
     ("C-A, C-E", "to the start or end of the prompt"),
     ("C-U, C-K", "delete to the start or end of the prompt"),
     ("C-Backspace", "delete a word"),
@@ -57,8 +58,21 @@ const KEYS: &[(&str, &str)] = &[
     ("C-D", "quit; a popup asks first while Claude or a command of its runs, and always under gluon"),
 ];
 
-/// What the /model popup offers; Claude Code takes each name for its newest model.
-const MODELS: &[&str] = &["opus", "sonnet", "haiku", "fable", "default"];
+/// What the /model popup offers: the name shown, and the id it sends. A new
+/// model goes in here; `/model <alias>` reaches it before that.
+const MODELS: &[(&str, &str)] = &[
+    ("Opus 5.5", "claude-opus-5-5"),
+    ("Opus 5", "claude-opus-5"),
+    ("Sonnet 5.5", "claude-sonnet-5-5"),
+    ("Sonnet 5", "claude-sonnet-5"),
+    ("Haiku 5.5", "claude-haiku-5-5"),
+    ("Fable 5.1", "claude-fable-5-1"),
+    ("Fable 5", "claude-fable-5"),
+    ("default", "default"),
+];
+
+/// What the /effort popup offers, least first.
+const EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -129,6 +143,9 @@ pub struct App {
     /// so the cursor stays hidden.
     focus: bool,
     model: String,
+    /// How hard Claude thinks: settings.json's effortLevel at start, then
+    /// the last /effort sent. Claude Code does not say it in its stream.
+    effort: String,
     version: String,
     context: u64,
     window: u64,
@@ -622,6 +639,7 @@ impl App {
             over: false,
             focus: true,
             model: last.model,
+            effort: settings_effort(),
             version: String::new(),
             context: last.context,
             window,
@@ -958,6 +976,9 @@ impl App {
         if let Some(cmd) = text.strip_prefix('!') {
             return self.shell(cmd.trim());
         }
+        if let Some(level) = text.strip_prefix("/effort ").map(str::trim).filter(|l| EFFORTS.contains(l)) {
+            self.effort = level.to_string();
+        }
         let seen = std::mem::take(&mut self.seen);
         // fleet's wake: the messages go in the prompt itself. A model can
         // skip what the bus hook adds beside a prompt (Kimi did, three
@@ -1033,6 +1054,7 @@ impl App {
             "cwd": self.s.cwd,
             "version": self.version,
             "model": {"id": self.model, "display_name": model_name(&self.model)},
+            "effort": {"level": self.effort},
             "workspace": {"current_dir": self.s.cwd, "project_dir": self.s.cwd},
             "context_window": {"context_window_size": self.window, "current_usage": {"input_tokens": self.context}},
         });
@@ -1296,25 +1318,39 @@ impl App {
 
     /// The models /model offers, with the bar on the one in use. Esc picks none.
     fn pick_model(&mut self) -> Option<String> {
+        let now = model_row(&self.model);
+        let rows: Vec<(&str, &str)> = MODELS
+            .iter()
+            .enumerate()
+            .map(|(i, (name, _))| (*name, if Some(i) == now { "in use" } else if *name == "default" { "the one in settings.json" } else { "" }))
+            .collect();
+        self.pick("Switch to", &rows, now).map(|i| MODELS[i].1.to_string())
+    }
+
+    /// The effort levels /effort offers, with the bar on the one in use.
+    fn pick_effort(&mut self) -> Option<String> {
+        let now = EFFORTS.iter().position(|e| *e == self.effort);
+        let rows: Vec<(&str, &str)> = EFFORTS.iter().enumerate().map(|(i, e)| (*e, if Some(i) == now { "in use" } else { "" })).collect();
+        self.pick("Think", &rows, now).map(|i| EFFORTS[i].to_string())
+    }
+
+    /// A popup of names with a note beside each; the bar starts on `now`.
+    /// Gives the row picked, or None on Esc.
+    fn pick(&mut self, title: &str, rows: &[(&str, &str)], now: Option<usize>) -> Option<usize> {
         self.cover();
-        let now = model_name(&self.model).split(' ').next().unwrap_or("").to_lowercase();
-        let mut items = vec![format!(" {}", style::bold("Switch to")), String::new()];
-        for m in MODELS {
-            let note = match *m {
-                _ if *m == now => "  in use",
-                "default" => "  the one in settings.json",
-                _ => "",
-            };
-            items.push(format!(" {}{}", style::fg(m, GREEN), style::dim(note)));
+        let mut items = vec![format!(" {}", style::bold(title)), String::new()];
+        let wide = rows.iter().map(|(n, _)| n.len()).max().unwrap_or(0);
+        for (name, note) in rows {
+            items.push(format!(" {}  {}", style::fg(&format!("{name:<wide$}"), GREEN), style::dim(note)));
         }
         let w = items.iter().map(|i| crust::display_width(i)).max().unwrap_or(0) as u16 + 2;
         let mut pop = Popup::centered(w, items.len() as u16, 231, 236);
-        pop.pane.index = 2 + MODELS.iter().position(|m| *m == now).unwrap_or(0);
+        pop.pane.index = 2 + now.unwrap_or(0);
         // No cursor while a popup is up; layout() puts it back after.
         print!("{}", seq::HIDE);
         let at = pop.modal(&items.join("\n"));
         self.layout();
-        MODELS.get(at?.checked_sub(2)?).map(|m| m.to_string())
+        at?.checked_sub(2).filter(|i| *i < rows.len())
     }
 
     /// The keys in a popup, as in the other Fe2O3 programs. Esc, q or Enter
@@ -1463,14 +1499,17 @@ impl App {
         if text.is_empty() || self.ended.is_some() {
             return;
         }
-        // /model alone picks in a popup; the pick goes on as "/model <name>".
-        let text = if text == "/model" {
-            match self.pick_model() {
-                Some(m) => format!("/model {m}"),
-                None => return self.layout(),
-            }
-        } else {
-            text
+        // /model and /effort alone pick in a popup; the pick goes on as
+        // "/model <name>" or "/effort <level>".
+        let picked = match text.as_str() {
+            "/model" => Some(self.pick_model().map(|m| format!("/model {m}"))),
+            "/effort" => Some(self.pick_effort().map(|e| format!("/effort {e}"))),
+            _ => None,
+        };
+        let text = match picked {
+            Some(Some(t)) => t,
+            Some(None) => return self.layout(),
+            None => text,
         };
         self.remember(&text);
         // A ! command waits in purple too, and runs when its turn comes.
@@ -1673,7 +1712,7 @@ impl App {
     fn side(&self) -> Side {
         Side {
             tag: self.name().to_uppercase(),
-            model: model_name(&self.model).to_uppercase(),
+            model: format!("{} {}", model_name(&self.model), self.effort).trim().to_uppercase(),
             ctx: context_label(self.context, self.window),
             week: self.limits.map_or(String::new(), |l| format!("WEEK {:.0}%", l.1)),
             state: self.state_lines(),
@@ -2442,6 +2481,22 @@ fn context_label(tokens: u64, window: u64) -> String {
     if window > 0 { format!("{t} {}%", tokens * 100 / window) } else { t }
 }
 
+/// The /model popup's row for the model in use, by its name.
+fn model_row(id: &str) -> Option<usize> {
+    let name = model_name(id);
+    MODELS.iter().position(|(n, _)| *n == name)
+}
+
+/// The effortLevel in ~/.claude/settings.json, or "" when it sets none.
+fn settings_effort() -> String {
+    let home = std::env::var("HOME").unwrap_or_default();
+    fs::read_to_string(format!("{home}/.claude/settings.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| v["effortLevel"].as_str().map(str::to_string))
+        .unwrap_or_default()
+}
+
 fn model_name(id: &str) -> String {
     let rest = id.strip_prefix("claude-").unwrap_or(id);
     let mut parts = rest.split('-');
@@ -2770,6 +2825,14 @@ mod tests {
         assert_eq!(model_name("claude-opus-5-5"), "Opus 5.5");
         assert_eq!(model_name("claude-haiku-4-5-20251001"), "Haiku 4.5");
         assert_eq!(model_name(""), "Claude");
+    }
+
+    #[test]
+    fn the_model_popup_finds_the_version_in_use() {
+        assert_eq!(model_row("claude-opus-5-5"), Some(0));
+        assert_eq!(model_row("claude-opus-5"), Some(1));
+        assert_eq!(model_row("claude-fable-5-1"), Some(5));
+        assert_eq!(model_row("claude-haiku-4-5-20251001"), None);
     }
 
     #[test]
