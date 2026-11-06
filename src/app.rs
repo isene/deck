@@ -2575,7 +2575,9 @@ fn link_urls(text: &str, src: &str) -> String {
                 links[l].push((s, e, url.clone()));
             }
         }
-        (i, from) = (end_line, end.max(p + 1));
+        // On the URL's own row the search goes on past its start; on the
+        // row it ran on to, from its end, since p is a place in another row.
+        (i, from) = (end_line, if end_line == i { end.max(p + 1) } else { end });
     }
     let linked: Vec<String> = lines
         .iter()
@@ -2598,7 +2600,8 @@ fn link_urls(text: &str, src: &str) -> String {
 /// Where the next http:// or https:// URL in `s` starts, from byte `from`.
 fn find_url(s: &str, from: usize) -> Option<usize> {
     let mut at = from;
-    while let Some(i) = s[at..].find("http") {
+    // get(): a place past the end is no URL, never a crash at start.
+    while let Some(i) = s.get(at..)?.find("http") {
         let p = at + i;
         if s[p..].starts_with("https://") || s[p..].starts_with("http://") {
             return Some(p);
@@ -2818,6 +2821,16 @@ mod tests {
         assert_ne!(plain(&start), plain(&text));
         let widths = |s: &str| plain(s).lines().map(|l| (l.chars().count(), l.matches(' ').count())).collect::<Vec<_>>();
         assert_eq!(widths(&start), widths(&text));
+    }
+
+    #[test]
+    fn a_url_that_runs_on_to_a_short_row_is_one_link() {
+        // The URL starts further in than the row it runs on to is long; deck
+        // 0.1.53 looked for the next URL past that row's end and quit.
+        let text = "a long prefix of text here https://example.com/abcdefghij\n      oxy/>";
+        let src = "a long prefix of text here https://example.com/abcdefghijoxy/>";
+        let out = link_urls(text, src);
+        assert_eq!(out.matches("https://example.com/abcdefghijoxy/").count(), 2);
     }
 
     #[test]
