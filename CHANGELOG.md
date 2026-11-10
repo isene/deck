@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.61 (2026-11-10)
+
+- C-V lists the open items of this session only, each in full.
+
 ## 0.1.60 (2026-11-10)
 
 - C-V shows what every session waits for you to do or decide, as v

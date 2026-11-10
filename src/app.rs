@@ -53,7 +53,7 @@ const KEYS: &[(&str, &str)] = &[
     ("C-W, C-S-W", "answer pane a tenth wider, narrower"),
     ("C-B", "pick the answer pane's colour (prism)"),
     ("C-S-B", "the next look: plain, the bridge, the matrix (green in glass); it stays for the next start"),
-    ("C-V", "what every session waits for you to do or decide (fleet's v)"),
+    ("C-V", "what this session still waits for you to do or decide"),
     ("C-L", "draw the screen again"),
     ("C-?", "this help"),
     ("C-D", "quit; a popup asks first while Claude or a command of its runs, and always under gluon"),
@@ -1382,19 +1382,24 @@ impl App {
         self.show_text(t.trim_end());
     }
 
-    /// The open items of every session, as fleet lists them: one run of
+    /// This session's open items, as fleet lists them: one run of
     /// `fleet --moves` per key press, nothing while the popup is shut.
     fn show_open(&mut self) {
         let out = Command::new("fleet").arg("--moves").stdin(Stdio::null()).output();
         let rows = match out {
-            Ok(o) => String::from_utf8_lossy(&o.stdout).trim_end().to_string(),
-            Err(e) => format!("fleet: {e}"),
+            Ok(o) => String::from_utf8_lossy(&o.stdout).to_string(),
+            Err(e) => return self.show_text(&format!(" fleet: {e}")),
         };
+        // fleet names a session by its tag, else by its folder.
+        let folder = self.s.cwd.rsplit('/').next().unwrap_or("").to_string();
+        let name = self.s.tags.first().cloned().unwrap_or(folder);
         let (cols, _) = Crust::terminal_size();
-        let max = (cols as usize).saturating_sub(10);
-        let mut t = format!(" {}\n", style::bold("Open items"));
-        for r in rows.lines() {
-            let r: String = if r.chars().count() > max { r.chars().take(max.saturating_sub(1)).chain(['…']).collect() } else { r.into() };
+        let mut t = format!(" {}\n", style::bold(&format!("Open in {name}")));
+        let mine = open_rows(&rows, &name, (cols as usize).saturating_sub(12));
+        if mine.is_empty() {
+            t += "  nothing open\n";
+        }
+        for r in mine {
             t += &format!("  {r}\n");
         }
         self.show_text(t.trim_end());
@@ -2529,6 +2534,29 @@ fn model_row(id: &str) -> Option<usize> {
 }
 
 /// The effortLevel in ~/.claude/settings.json, or "" when it sets none.
+/// The rows of `fleet --moves` ("name age number text") that belong to
+/// `name`, as "number text", folded at `width`.
+fn open_rows(rows: &str, name: &str, width: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    for r in rows.lines() {
+        let mut parts = r.split_whitespace();
+        if parts.next() != Some(name) {
+            continue;
+        }
+        let (Some(_age), Some(n)) = (parts.next(), parts.next()) else { continue };
+        let mut line = format!("{n:>2}.");
+        for word in parts {
+            if line.chars().count() + 1 + word.chars().count() > width.max(20) {
+                out.push(std::mem::replace(&mut line, "   ".into()));
+            }
+            line.push(' ');
+            line += word;
+        }
+        out.push(line);
+    }
+    out
+}
+
 /// The model id in a "/model <id>" line; None for an alias or other text.
 fn picked_model(text: &str) -> Option<&str> {
     text.strip_prefix("/model ").map(str::trim).filter(|m| m.starts_with("claude-"))
@@ -2929,6 +2957,14 @@ mod tests {
         assert_eq!(picked_model("/model claude-fable-5-2 "), Some("claude-fable-5-2"));
         assert_eq!(picked_model("/model sonnet"), None);
         assert_eq!(picked_model("say /model claude-fable-5-2"), None);
+    }
+
+    #[test]
+    fn the_open_popup_lists_this_session_only() {
+        let rows = "fw     15m   6  reword the marked lines\nsystem 7h31m  2  restart fleet\nfw      2d   7  a b c";
+        assert_eq!(open_rows(rows, "fw", 80), [" 6. reword the marked lines", " 7. a b c"]);
+        assert_eq!(open_rows(rows, "fw", 20)[..2], [" 6. reword the", "    marked lines"]);
+        assert!(open_rows(rows, "f", 80).is_empty());
     }
 
     #[test]
