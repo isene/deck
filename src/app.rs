@@ -66,8 +66,8 @@ const MODELS: &[(&str, &str)] = &[
     ("Sonnet 5.5", "claude-sonnet-5-5"),
     ("Sonnet 5", "claude-sonnet-5"),
     ("Haiku 5.5", "claude-haiku-5-5"),
+    ("Fable 5.2", "claude-fable-5-2"),
     ("Fable 5.1", "claude-fable-5-1"),
-    ("Fable 5", "claude-fable-5"),
     ("default", "default"),
 ];
 
@@ -2844,7 +2844,8 @@ mod tests {
     fn the_model_popup_finds_the_version_in_use() {
         assert_eq!(model_row("claude-opus-5-5"), Some(0));
         assert_eq!(model_row("claude-opus-5"), Some(1));
-        assert_eq!(model_row("claude-fable-5-1"), Some(5));
+        assert_eq!(model_row("claude-fable-5-2"), Some(5));
+        assert_eq!(model_row("claude-fable-5-1"), Some(6));
         assert_eq!(model_row("claude-haiku-4-5-20251001"), None);
     }
 

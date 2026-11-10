@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.55 (2026-11-10)
+
+- /model offers Fable 5.2 (`claude-fable-5-2`) and Fable 5.1; Fable 5
+  leaves the popup. Claude Code knows Fable 5.2 from 2.1.321.
+
+## 0.1.54
+
+- A link that runs on to a short row no longer stops deck at start.
+
+## 0.1.53
+
+- /model offers the version before the newest; /effort picks in a popup.
+
 ## 0.1.52 (2026-11-05)
 
 - fleet's wake shows only the messages it brought, without the "Check
