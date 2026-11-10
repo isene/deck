@@ -979,6 +979,13 @@ impl App {
         if let Some(level) = text.strip_prefix("/effort ").map(str::trim).filter(|l| EFFORTS.contains(l)) {
             self.effort = level.to_string();
         }
+        // The bottom row shows a picked model at once. Claude Code names
+        // the model only at the start of a turn, and an alias ("sonnet")
+        // waits for that.
+        if let Some(id) = picked_model(&text) {
+            self.model = id.to_string();
+            self.window = known_window(id);
+        }
         let seen = std::mem::take(&mut self.seen);
         // fleet's wake: the messages go in the prompt itself. A model can
         // skip what the bus hook adds beside a prompt (Kimi did, three
@@ -2488,6 +2495,11 @@ fn model_row(id: &str) -> Option<usize> {
 }
 
 /// The effortLevel in ~/.claude/settings.json, or "" when it sets none.
+/// The model id in a "/model <id>" line; None for an alias or other text.
+fn picked_model(text: &str) -> Option<&str> {
+    text.strip_prefix("/model ").map(str::trim).filter(|m| m.starts_with("claude-"))
+}
+
 fn settings_effort() -> String {
     let home = std::env::var("HOME").unwrap_or_default();
     fs::read_to_string(format!("{home}/.claude/settings.json"))
@@ -2876,6 +2888,13 @@ mod tests {
         assert_eq!(at_column(rows[1], &input, 4), 7);
         assert_eq!(at_column(rows[0], &input, 7), 4);
         assert_eq!(input_rows(&[], 8), vec![(0, 0)]);
+    }
+
+    #[test]
+    fn a_model_line_names_the_model_for_the_bottom_row() {
+        assert_eq!(picked_model("/model claude-fable-5-2 "), Some("claude-fable-5-2"));
+        assert_eq!(picked_model("/model sonnet"), None);
+        assert_eq!(picked_model("say /model claude-fable-5-2"), None);
     }
 
     #[test]

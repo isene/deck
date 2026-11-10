@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.56 (2026-11-10)
+
+- The bottom row shows a model picked with /model at once. It kept
+  the old name until the next turn started.
+
 ## 0.1.55 (2026-11-10)
 
 - /model offers Fable 5.2 (`claude-fable-5-2`) and Fable 5.1; Fable 5
