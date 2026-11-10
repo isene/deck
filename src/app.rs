@@ -143,6 +143,8 @@ pub struct App {
     /// so the cursor stays hidden.
     focus: bool,
     model: String,
+    /// A model picked with /model, until Claude Code has answered the pick.
+    picked: Option<String>,
     /// How hard Claude thinks: settings.json's effortLevel at start, then
     /// the last /effort sent. Claude Code does not say it in its stream.
     effort: String,
@@ -639,6 +641,7 @@ impl App {
             over: false,
             focus: true,
             model: last.model,
+            picked: None,
             effort: settings_effort(),
             version: String::new(),
             context: last.context,
@@ -710,6 +713,8 @@ impl App {
             match e {
                 Event::Init { session, model, version } => {
                     self.s.id = session;
+                    // The turn that changes the model still names the old one.
+                    let model = self.picked.take().unwrap_or(model);
                     if self.window == 0 {
                         self.window = known_window(&model);
                     }
@@ -985,6 +990,8 @@ impl App {
         if let Some(id) = picked_model(&text) {
             self.model = id.to_string();
             self.window = known_window(id);
+            self.picked = Some(id.to_string());
+            self.run_status();
         }
         let seen = std::mem::take(&mut self.seen);
         // fleet's wake: the messages go in the prompt itself. A model can

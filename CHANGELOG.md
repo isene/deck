@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.57 (2026-11-10)
+
+- The bottom row keeps a model picked with /model. Claude Code
+  answers the pick with the old model's name, which put it back.
+
 ## 0.1.56 (2026-11-10)
 
 - The bottom row shows a model picked with /model at once. It kept
