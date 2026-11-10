@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.58 (2026-11-10)
+
+- A session started under a tag and closed before its first prompt
+  opens again by its tag. It gave "No transcript" before.
+
 ## 0.1.57 (2026-11-10)
 
 - The bottom row keeps a model picked with /model. Claude Code

@@ -119,10 +119,15 @@ pub fn find(arg: Option<&str>) -> Result<Session, String> {
     } else {
         owner(&b, tag).ok_or(format!("No session has the tag {tag}."))?
     };
+    let path = b["sessions"][&id]["path"].as_str().unwrap_or("").to_string();
     if transcript(&id).is_none() {
+        // Started under a tag and closed before its first prompt: the
+        // bookmark is all there is, so the session starts now.
+        if b["sessions"][&id].is_object() && PathBuf::from(&path).is_dir() {
+            return Ok(Session { tags: tags_of(&b, &id), id, cwd: path, resume: false });
+        }
         return Err(format!("No transcript for session {id}."));
     }
-    let path = b["sessions"][&id]["path"].as_str().unwrap_or("").to_string();
     let cwd = if !path.is_empty() && PathBuf::from(&path).is_dir() {
         path
     } else {
