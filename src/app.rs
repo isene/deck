@@ -53,6 +53,7 @@ const KEYS: &[(&str, &str)] = &[
     ("C-W, C-S-W", "answer pane a tenth wider, narrower"),
     ("C-B", "pick the answer pane's colour (prism)"),
     ("C-S-B", "the next look: plain, the bridge, the matrix (green in glass); it stays for the next start"),
+    ("C-V", "what every session waits for you to do or decide (fleet's v)"),
     ("C-L", "draw the screen again"),
     ("C-?", "this help"),
     ("C-D", "quit; a popup asks first while Claude or a command of its runs, and always under gluon"),
@@ -1162,6 +1163,7 @@ impl App {
             "C-B" => self.pick_colour(),
             "C-S-B" if !self.hosted => self.cycle_look(),
             "C-?" => self.show_help(),
+            "C-V" => self.show_open(),
             "C-J" | "S-ENTER" => {
                 self.input.insert(self.at, '\n');
                 self.at += 1;
@@ -1377,7 +1379,29 @@ impl App {
         for (k, what) in KEYS {
             t += &format!("{}{what}\n", style::fg(&format!("  {k:<16}"), GREEN));
         }
-        let t = t.trim_end();
+        self.show_text(t.trim_end());
+    }
+
+    /// The open items of every session, as fleet lists them: one run of
+    /// `fleet --moves` per key press, nothing while the popup is shut.
+    fn show_open(&mut self) {
+        let out = Command::new("fleet").arg("--moves").stdin(Stdio::null()).output();
+        let rows = match out {
+            Ok(o) => String::from_utf8_lossy(&o.stdout).trim_end().to_string(),
+            Err(e) => format!("fleet: {e}"),
+        };
+        let (cols, _) = Crust::terminal_size();
+        let max = (cols as usize).saturating_sub(10);
+        let mut t = format!(" {}\n", style::bold("Open items"));
+        for r in rows.lines() {
+            let r: String = if r.chars().count() > max { r.chars().take(max.saturating_sub(1)).chain(['…']).collect() } else { r.into() };
+            t += &format!("  {r}\n");
+        }
+        self.show_text(t.trim_end());
+    }
+
+    /// A popup that shows `t` until a key closes it.
+    fn show_text(&mut self, t: &str) {
         let (cols, rows) = Crust::terminal_size();
         let w = t.lines().map(crust::display_width).max().unwrap_or(0) as u16 + 4;
         let h = t.lines().count() as u16;

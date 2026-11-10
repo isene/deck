@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.60 (2026-11-10)
+
+- C-V shows what every session waits for you to do or decide, as v
+  does in fleet.
+
 ## 0.1.59 (2026-11-10)
 
 - deck sits in its session's folder, so a new terminal opened from
