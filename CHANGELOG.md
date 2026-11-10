@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.59 (2026-11-10)
+
+- deck sits in its session's folder, so a new terminal opened from
+  its window (tile's exec-here) starts in that folder.
+
 ## 0.1.58 (2026-11-10)
 
 - A session started under a tag and closed before its first prompt

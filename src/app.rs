@@ -243,6 +243,9 @@ pub fn run() {
         (arg, _) => start(arg, None, None),
     };
     let mut app = opened.unwrap_or_else(|e| quit(&e));
+    // deck sits in the session's folder, so a terminal opened "here" (tile's
+    // exec-here reads this process's folder) starts there too.
+    let _ = std::env::set_current_dir(&app.s.cwd);
     while app.running {
         let wait = app.before_wait();
         let key = Input::getchr(Some(wait));
