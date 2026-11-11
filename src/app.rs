@@ -778,8 +778,10 @@ impl App {
                     log = true;
                 }
                 // Only a prompt sent with C-Enter; the rest started a turn when sent.
-                Event::Taken(text) if self.pushed.front().is_some_and(|p| p.trim() == text.trim()) => {
-                    let text = shown(&self.pushed.pop_front().unwrap_or(text));
+                // Claude Code hands over several waiting prompts as one message.
+                Event::Taken(text) if taken(&self.pushed, &text) > 0 => {
+                    let n = taken(&self.pushed, &text);
+                    let text = self.pushed.drain(..n).map(|p| shown(&p)).collect::<Vec<_>>().join("\n");
                     match self.turns.last_mut() {
                         // Read inside the running turn, whose answer covers both.
                         Some(t) if t.answer.is_none() => {
@@ -2588,6 +2590,23 @@ fn open_rows(rows: &str, name: &str, width: usize) -> Vec<String> {
 }
 
 /// The model id in a "/model <id>" line; None for an alias or other text.
+/// How many of the first sent prompts the echoed message holds: Claude Code
+/// joins the ones that waited into one message, a line break between them.
+fn taken(pushed: &VecDeque<String>, text: &str) -> usize {
+    let bare = |s: &str| s.split_whitespace().collect::<String>();
+    let (want, mut have) = (bare(text), String::new());
+    for (i, p) in pushed.iter().enumerate() {
+        have += &bare(p);
+        if have == want {
+            return i + 1;
+        }
+        if !want.starts_with(&have) {
+            break;
+        }
+    }
+    0
+}
+
 fn picked_model(text: &str) -> Option<&str> {
     text.strip_prefix("/model ").map(str::trim).filter(|m| m.starts_with("claude-"))
 }
@@ -2757,6 +2776,16 @@ fn hyperlist(md: &str, width: usize) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn prompts_that_waited_are_read_as_one_message() {
+        let q: VecDeque<String> = ["one\n".to_string(), "two".into(), "three".into()].into();
+        assert_eq!(taken(&q, "one"), 1);
+        assert_eq!(taken(&q, "one\ntwo"), 2);
+        assert_eq!(taken(&q, "one\ntwo\nthree\n"), 3);
+        assert_eq!(taken(&q, "two"), 0);
+        assert_eq!(taken(&q, "one\ntw"), 0);
+    }
+
     use super::*;
 
     /// The HyperList hook's rows for the source in the test below.

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.63 (2026-11-11)
+
+- Prompts sent while Claude works leave the bottom of the left pane
+  once read. Claude Code hands over several waiting prompts as one
+  message, and deck then kept them all as unread, with every later
+  answer written above them.
+
 ## 0.1.62 (2026-11-11)
 
 - What Claude writes back to a prompt it reads inside a turn shows in
