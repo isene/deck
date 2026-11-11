@@ -111,6 +111,9 @@ enum Line {
 struct Turn {
     prompt: String,
     answer: Option<String>,
+    /// What Claude wrote back to a prompt it read inside the turn, before
+    /// going on with its work.
+    said: Option<String>,
     failed: bool,
     /// Where its lines start in the log.
     log_at: usize,
@@ -146,6 +149,9 @@ pub struct App {
     model: String,
     /// A model picked with /model, until Claude Code has answered the pick.
     picked: Option<String>,
+    /// A prompt was read inside the running turn, and Claude has not
+    /// written since.
+    asked: bool,
     /// How hard Claude thinks: settings.json's effortLevel at start, then
     /// the last /effort sent. Claude Code does not say it in its stream.
     effort: String,
@@ -646,6 +652,7 @@ impl App {
             focus: true,
             model: last.model,
             picked: None,
+            asked: false,
             effort: settings_effort(),
             version: String::new(),
             context: last.context,
@@ -697,7 +704,7 @@ impl App {
         for (prompt, answer) in last.turns {
             // A prompt with no answer had its turn cut short; a ! command needs none.
             let failed = answer.is_empty() && !prompt.starts_with("! ");
-            app.turns.push(Turn { prompt: prompt.clone(), answer: Some(answer), failed, log_at: app.log.len(), drawn: None });
+            app.turns.push(Turn { prompt: prompt.clone(), answer: Some(answer), said: None, failed, log_at: app.log.len(), drawn: None });
             app.log.push(Line::Prompt(prompt));
         }
         app
@@ -744,6 +751,19 @@ impl App {
                     log = true;
                     answer |= self.detail;
                 }
+                // The first text after a prompt read inside the turn answers
+                // that prompt, so it goes under it in the answer pane.
+                Event::Note(t) if self.asked && self.turns.last().is_some_and(|t| t.answer.is_none()) => {
+                    self.asked = false;
+                    self.step = Instant::now();
+                    if let Some(turn) = self.turns.last_mut() {
+                        turn.said = Some(match turn.said.take() {
+                            Some(s) => format!("{s}\n\n{t}"),
+                            None => t,
+                        });
+                    }
+                    answer = true;
+                }
                 Event::Note(t) => {
                     self.step = Instant::now();
                     self.log.push(Line::Note(t));
@@ -765,6 +785,7 @@ impl App {
                         Some(t) if t.answer.is_none() => {
                             t.prompt = format!("{}\n{text}", t.prompt);
                             self.log.push(Line::Prompt(text));
+                            self.asked = true;
                         }
                         // The turn had ended, so the prompt runs as the next one.
                         _ => self.start(text),
@@ -815,7 +836,12 @@ impl App {
                         crust::clipboard_copy(cmd, "clipboard");
                         self.flash = Some(format!("on the clipboard: {cmd}"));
                     }
+                    self.asked = false;
                     if let Some(t) = self.turns.last_mut() {
+                        // The turn ended on that reply: it is the answer.
+                        if t.said.as_deref().map(str::trim) == Some(text.trim()) {
+                            t.said = None;
+                        }
                         t.answer = Some(text);
                         t.failed = failed;
                         t.drawn = None;
@@ -1042,7 +1068,7 @@ impl App {
         if !text.is_empty() {
             self.log.push(Line::Prompt(text.clone()));
         }
-        self.turns.push(Turn { prompt: text, answer: None, failed: false, log_at: self.log.len(), drawn: None });
+        self.turns.push(Turn { prompt: text, answer: None, said: None, failed: false, log_at: self.log.len(), drawn: None });
         self.busy = Some(Instant::now());
         self.dim_at = None;
         if !self.hosted {
@@ -1608,7 +1634,7 @@ impl App {
             return self.layout();
         }
         let prompt = format!("! {cmd}");
-        self.turns.push(Turn { prompt: prompt.clone(), answer: Some(answer), failed, log_at: self.log.len(), drawn: None });
+        self.turns.push(Turn { prompt: prompt.clone(), answer: Some(answer), said: None, failed, log_at: self.log.len(), drawn: None });
         self.log.push(Line::Prompt(prompt));
         // Claude reads what it printed at once, and answers.
         if self.ended.is_none() {
@@ -2165,6 +2191,10 @@ fn turn_text(t: &mut Turn, width: usize) -> String {
         None => style::dim("…"),
         Some(a) if a.trim().is_empty() && t.failed => style::fg("✗ stopped", RED),
         Some(_) => drawn(t, width),
+    };
+    let body = match &t.said {
+        Some(s) => format!("{s}\n\n{body}"),
+        None => body,
     };
     if prompt.is_empty() {
         return body;
@@ -2965,6 +2995,13 @@ mod tests {
         assert_eq!(open_rows(rows, "fw", 80), [" 6. reword the marked lines", " 7. a b c"]);
         assert_eq!(open_rows(rows, "fw", 20)[..2], [" 6. reword the", "    marked lines"]);
         assert!(open_rows(rows, "f", 80).is_empty());
+    }
+
+    #[test]
+    fn a_reply_inside_the_turn_shows_under_its_prompt() {
+        let mut t = Turn { prompt: "build it\ncan I close chrome?".into(), answer: None, said: Some("Yes, you can.".into()), failed: false, log_at: 0, drawn: None };
+        let text = crust::strip_ansi(&turn_text(&mut t, 80));
+        assert_eq!(text, "› build it\n› can I close chrome?\n\nYes, you can.\n\n…");
     }
 
     #[test]

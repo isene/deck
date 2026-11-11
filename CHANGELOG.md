@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.62 (2026-11-11)
+
+- What Claude writes back to a prompt it reads inside a turn shows in
+  the answer pane, under that prompt. It was one grey, cut line in the
+  tool log.
+
 ## 0.1.61 (2026-11-10)
 
 - C-V lists the open items of this session only, each in full.
