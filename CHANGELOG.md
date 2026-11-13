@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.65 (2026-11-13)
+
+- An answer stays on screen when Claude answers again by itself. When
+  an agent or a background task reports, Claude Code starts a turn with
+  no prompt, and deck wrote that answer over the one before. Three
+  agents reporting looked like one answer written three times. Such an
+  answer now gets a place of its own under the earlier one.
+
 ## 0.1.64 (2026-11-13)
 
 - `/login` signs in to Claude again. `claude -p` has no /login of

@@ -161,6 +161,8 @@ pub struct App {
     window: u64,
     limits: Option<(f64, f64, u64)>,
     turns: Vec<Turn>,
+    /// Where the log stood when the last turn ended.
+    turn_end: usize,
     log: Vec<Line>,
     waiting: VecDeque<String>,
     /// Prompts sent mid-turn with C-Enter that Claude has not read yet.
@@ -660,6 +662,7 @@ impl App {
             window,
             limits: None,
             turns: Vec::new(),
+            turn_end: 0,
             log: Vec::new(),
             waiting: VecDeque::new(),
             pushed: VecDeque::new(),
@@ -840,16 +843,8 @@ impl App {
                         self.flash = Some(format!("on the clipboard: {cmd}"));
                     }
                     self.asked = false;
-                    if let Some(t) = self.turns.last_mut() {
-                        // The turn ended on that reply: it is the answer.
-                        if t.said.as_deref().map(str::trim) == Some(text.trim()) {
-                            t.said = None;
-                        }
-                        t.answer = Some(text);
-                        t.failed = failed;
-                        t.drawn = None;
-                        fresh = !failed;
-                    }
+                    fresh = end_turn(&mut self.turns, text, failed, self.turn_end);
+                    self.turn_end = self.log.len();
                     answer = true;
                     log = true;
                     status = true;
@@ -2209,6 +2204,28 @@ fn drawn(t: &mut Turn, width: usize) -> String {
     t.drawn.as_ref().map(|d| d.1.clone()).unwrap_or_default()
 }
 
+/// The end of a turn: `text` is its answer. True when a new answer is on
+/// screen. Claude Code starts a turn of its own when an agent or a
+/// background task reports; that answer gets a turn with no prompt, so
+/// the answer before it stays. `log_at` is where such a turn's lines start.
+fn end_turn(turns: &mut Vec<Turn>, text: String, failed: bool, log_at: usize) -> bool {
+    if turns.last().is_some_and(|t| t.answer.is_some()) {
+        if text.trim().is_empty() {
+            return false;
+        }
+        turns.push(Turn { prompt: String::new(), answer: None, said: None, failed: false, log_at, drawn: None });
+    }
+    let Some(t) = turns.last_mut() else { return false };
+    // The turn ended on that reply: it is the answer.
+    if t.said.as_deref().map(str::trim) == Some(text.trim()) {
+        t.said = None;
+    }
+    t.answer = Some(text);
+    t.failed = failed;
+    t.drawn = None;
+    !failed
+}
+
 fn turn_text(t: &mut Turn, width: usize) -> String {
     let prompt: Vec<String> = t.prompt.lines().map(|l| style::fg(&format!("› {l}"), BLUE)).collect();
     let body = match &t.answer {
@@ -3046,6 +3063,24 @@ mod tests {
         assert_eq!(open_rows(rows, "fw", 80), [" 6. reword the marked lines", " 7. a b c"]);
         assert_eq!(open_rows(rows, "fw", 20)[..2], [" 6. reword the", "    marked lines"]);
         assert!(open_rows(rows, "f", 80).is_empty());
+    }
+
+    #[test]
+    fn an_answer_with_no_prompt_keeps_the_answer_before_it() {
+        let turn = |answer: Option<&str>| Turn { prompt: "list them".into(), answer: answer.map(String::from), said: None, failed: false, log_at: 0, drawn: None };
+        // The prompt's own answer fills its turn.
+        let mut turns = vec![turn(None)];
+        assert!(end_turn(&mut turns, "the list".into(), false, 3));
+        assert_eq!(turns.len(), 1);
+        // An agent reports: Claude Code answers again, with no prompt from deck.
+        assert!(end_turn(&mut turns, "the agent is done".into(), false, 3));
+        assert_eq!(turns.len(), 2);
+        assert_eq!(turns[0].answer.as_deref(), Some("the list"));
+        assert_eq!((turns[1].prompt.as_str(), turns[1].answer.as_deref(), turns[1].log_at), ("", Some("the agent is done"), 3));
+        // A turn of its own that says nothing changes nothing.
+        assert!(!end_turn(&mut turns, " ".into(), false, 5));
+        assert_eq!(turns.len(), 2);
+        assert_eq!(turns[1].answer.as_deref(), Some("the agent is done"));
     }
 
     #[test]
