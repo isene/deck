@@ -40,6 +40,7 @@ const KEYS: &[(&str, &str)] = &[
     ("! command", "run it in a shell; Claude reads what it printed and answers"),
     ("/model", "pick the model in a popup; /model sonnet switches at once"),
     ("/effort", "pick how hard Claude thinks in a popup; /effort high sets it at once"),
+    ("/login", "sign in to Claude again, in the browser; the session goes on"),
     ("C-A, C-E", "to the start or end of the prompt"),
     ("C-U, C-K", "delete to the start or end of the prompt"),
     ("C-Backspace", "delete a word"),
@@ -1013,6 +1014,9 @@ impl App {
         if let Some(cmd) = text.strip_prefix('!') {
             return self.shell(cmd.trim());
         }
+        if text == "/login" {
+            return self.login();
+        }
         if let Some(level) = text.strip_prefix("/effort ").map(str::trim).filter(|l| EFFORTS.contains(l)) {
             self.effort = level.to_string();
         }
@@ -1609,6 +1613,24 @@ impl App {
         if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(history_file()) {
             let _ = f.write_all(format!("{line}\n").as_bytes());
         }
+    }
+
+    /// /login: Claude Code's sign-in, on the terminal, since `claude -p`
+    /// has none. The running Claude Code reads the new login when its old
+    /// one is refused, so the session goes on.
+    fn login(&mut self) {
+        let program = std::env::var("DECK_CLAUDE").unwrap_or_else(|_| "claude".into());
+        let code = self.hand_over(Command::new(program).args(["auth", "login"]).current_dir(&self.s.cwd));
+        let failed = code != Some(0);
+        let answer = match code {
+            Some(0) => "Signed in.".to_string(),
+            Some(c) => format!("The sign-in failed, exit {c}."),
+            None => "The sign-in did not run.".to_string(),
+        };
+        let prompt = "/login".to_string();
+        self.turns.push(Turn { prompt: prompt.clone(), answer: Some(answer), said: None, failed, log_at: self.log.len(), drawn: None });
+        self.log.push(Line::Prompt(prompt));
+        self.layout();
     }
 
     /// `!` runs a command on the terminal itself, so a password prompt

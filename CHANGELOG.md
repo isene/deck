@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.64 (2026-11-13)
+
+- `/login` signs in to Claude again. `claude -p` has no /login of
+  its own, so deck hands the terminal to `claude auth login`, and the
+  running session reads the new login when its old one is refused.
+
 ## 0.1.63 (2026-11-11)
 
 - Prompts sent while Claude works leave the bottom of the left pane

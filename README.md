@@ -66,6 +66,7 @@ deck <id>         open the session with this id
 | `!` command | runs on the terminal; while Claude works it waits in purple like a message, and C-Enter runs it now and sends Claude its output |
 | `/model` | picks the model in a popup, the newest of each kind and the one before; `/model sonnet` switches at once. The switch lasts until deck quits |
 | `/effort` | picks how hard Claude thinks (low to max) in a popup; `/effort high` sets it at once. It lasts until deck quits |
+| `/login` | signs in to Claude again with `claude auth login`, in the browser; the running session reads the new login and goes on |
 | S-Enter, C-J, \\ Enter | a new line in the prompt |
 | Up, Down | the row above or below, else earlier prompts, also from past runs; with text typed, only the prompts that start with it (`! ` and Up: the ! commands) |
 | !command | run it in a shell; Claude reads what it printed and answers. When an answer hands you a script as code, `` `! /tmp/fix.sh` ``, deck puts it on the clipboard |
