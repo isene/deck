@@ -52,6 +52,9 @@ pub enum Event {
     Limits { hours: f64, week: f64, week_reset: u64 },
     /// A new status line, drawn by ~/.claude/statusline.sh.
     Status(String),
+    /// The background tasks that run now, a few words on each. Claude Code
+    /// sends the whole list each time one starts or ends.
+    Bg(Vec<String>),
     /// The process ended.
     Gone,
 }
@@ -65,6 +68,10 @@ pub fn read(v: &Value) -> Vec<Event> {
     }
     let s = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
     match v["type"].as_str().unwrap_or("") {
+        "system" if v["subtype"] == "background_tasks_changed" => {
+            let tasks = v["tasks"].as_array().into_iter().flatten();
+            out.push(Event::Bg(tasks.map(|t| s(t, "description").chars().take(30).collect()).collect()));
+        }
         "system" if v["subtype"] == "init" => {
             out.push(Event::Init {
                 session: s(v, "session_id"),
@@ -411,6 +418,14 @@ mod tests {
 
     fn ev(s: &str) -> Vec<Event> {
         read(&serde_json::from_str(s).unwrap())
+    }
+
+    #[test]
+    fn the_list_of_background_tasks_is_read_whole() {
+        let line = r#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b1","task_type":"local_bash","description":"spare server"}]}"#;
+        assert_eq!(ev(line), vec![Event::Bg(vec!["spare server".into()])]);
+        let none = r#"{"type":"system","subtype":"background_tasks_changed","tasks":[]}"#;
+        assert_eq!(ev(none), vec![Event::Bg(Vec::new())]);
     }
 
     #[test]

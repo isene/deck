@@ -167,6 +167,8 @@ pub struct App {
     waiting: VecDeque<String>,
     /// Prompts sent mid-turn with C-Enter that Claude has not read yet.
     pushed: VecDeque<String>,
+    /// Background tasks that run now, a few words on each.
+    bg: Vec<String>,
     asks: VecDeque<(String, String, Value)>,
     busy: Option<Instant>,
     /// Since when Claude has been idle and running; None once paused.
@@ -666,6 +668,7 @@ impl App {
             log: Vec::new(),
             waiting: VecDeque::new(),
             pushed: VecDeque::new(),
+            bg: Vec::new(),
             asks: VecDeque::new(),
             busy: None,
             quiet: Some(Instant::now()),
@@ -823,6 +826,10 @@ impl App {
                         self.notify(&what);
                         self.asks.push_back((id, tool, input));
                     }
+                }
+                Event::Bg(tasks) => {
+                    self.bg = tasks;
+                    status = true;
                 }
                 Event::Answer { text, failed, window } => {
                     if window > 0 && window != self.window {
@@ -1144,9 +1151,12 @@ impl App {
         self.flash = None;
         // Quitting stops a Claude at work, and under gluon ends gluon too,
         // so a popup asks first.
-        let working = self.busy.is_some() || self.claude.has_children();
-        if k == "C-D" && (working || self.hosted) {
-            return self.sure_to_quit(working);
+        // Asked only on C-D: has_children reads /proc.
+        if k == "C-D" {
+            let working = self.busy.is_some() || !self.bg.is_empty() || self.claude.has_children();
+            if working || self.hosted {
+                return self.sure_to_quit(working);
+            }
         }
         if let Some((id, _, input)) = self.asks.front().cloned() {
             match k {
@@ -1345,7 +1355,9 @@ impl App {
     /// A popup before quitting: y quits, any other key stays.
     fn sure_to_quit(&mut self, working: bool) -> bool {
         let what = if self.hosted { "quit gluon" } else { "quit" };
-        let q = if working {
+        let q = if working && self.busy.is_none() && !self.bg.is_empty() {
+            format!("Still running: {}. Stop it and {what}?", bg_text(&self.bg))
+        } else if working {
             format!("Claude is still at work. Stop it and {what}?")
         } else {
             "Quit gluon?".to_string()
@@ -1854,6 +1866,9 @@ impl App {
             }
         } else {
             v.push("READY".into());
+        }
+        if !self.bg.is_empty() && self.ended.is_none() {
+            v.push(bg_text(&self.bg).to_uppercase());
         }
         if !self.eta.is_empty() && self.ended.is_none() {
             v.push(format!("ETA {}", self.eta));
@@ -2629,6 +2644,11 @@ fn open_rows(rows: &str, name: &str, width: usize) -> Vec<String> {
 }
 
 /// The model id in a "/model <id>" line; None for an alias or other text.
+/// The background tasks for the top bar: "1 bg: spare server".
+fn bg_text(bg: &[String]) -> String {
+    format!("{} bg: {}", bg.len(), bg.join(", "))
+}
+
 /// How many of the first sent prompts the echoed message holds: Claude Code
 /// joins the ones that waited into one message, a line break between them.
 fn taken(pushed: &VecDeque<String>, text: &str) -> usize {
@@ -2815,6 +2835,12 @@ fn hyperlist(md: &str, width: usize) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_bar_counts_and_names_background_tasks() {
+        assert_eq!(bg_text(&["spare server".to_string()]), "1 bg: spare server");
+        assert_eq!(bg_text(&["a".to_string(), "b".to_string()]), "2 bg: a, b");
+    }
+
     #[test]
     fn prompts_that_waited_are_read_as_one_message() {
         let q: VecDeque<String> = ["one\n".to_string(), "two".into(), "three".into()].into();

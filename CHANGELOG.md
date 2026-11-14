@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.66 (2026-11-14)
+
+- The top bar names the background commands that still run, as in
+  "1 bg: spare server", and so does the question C-D asks. Before, the
+  bar said "ready" while C-D said Claude was still at work.
+- deck no longer reads /proc on every key press, only on C-D.
+
 ## 0.1.65 (2026-11-13)
 
 - An answer stays on screen when Claude answers again by itself. When
