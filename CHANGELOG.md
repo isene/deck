@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.67 (2026-11-14)
+
+- The background tasks show in deck's own top bar too. 0.1.66 wrote
+  them only to the state lines gluon's sidebar shows.
+
 ## 0.1.66 (2026-11-14)
 
 - The top bar names the background commands that still run, as in

@@ -1790,6 +1790,9 @@ impl App {
             let c = if session::late(&self.eta, &clock()) { RED } else { ETA };
             left += &style::fg(&format!(" · ETA {eta}"), c);
         }
+        if !self.bg.is_empty() && self.ended.is_none() {
+            left += &style::fg(&format!(" · {}", bg_text(&self.bg)), AMBER);
+        }
         if let Some(f) = &self.flash {
             left += &style::dim(&format!(" · {f}"));
         }
