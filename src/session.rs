@@ -270,7 +270,8 @@ pub fn last_in<'a>(lines: impl Iterator<Item = &'a str>) -> Last {
             Some("attachment") => {
                 let p = v["attachment"]["prompt"].as_str().filter(|_| v["attachment"]["type"] == "queued_command");
                 if let (Some(p), Some(turn)) = (p, l.turns.last_mut()) {
-                    turn.0 = format!("{}\n{}", turn.0, p.trim());
+                    let p = crate::claude::task_end(p).unwrap_or(p.trim().to_string());
+                    turn.0 = format!("{}\n{}", turn.0, p);
                 }
             }
             Some("user") => {
@@ -543,6 +544,7 @@ mod tests {
             r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash"}]}}"#,
             r#"{"type":"user","message":{"content":[{"type":"tool_result","content":"ok"}]}}"#,
             r#"{"type":"attachment","attachment":{"type":"queued_command","prompt":"and this"}}"#,
+            r#"{"type":"attachment","attachment":{"type":"queued_command","prompt":"<task-notification>\n<status>completed</status>\n<summary>Background command \"nap\" completed</summary>"}}"#,
             r#"{"type":"user","isMeta":true,"message":{"content":"meta"}}"#,
             r#"{"type":"attachment","attachment":{"type":"hook_additional_context","content":["Messages delivered via the fleet bus (from ...):\n- hi\n-- web"]}}"#,
             r#"{"type":"user","message":{"content":[{"type":"text","text":"Stop hook feedback: too long"}]}}"#,
@@ -556,7 +558,7 @@ mod tests {
             r#"{"type":"assistant","message":{"content":[{"type":"text","text":"No response requested."}]}}"#,
         ];
         let l = last_in(lines.into_iter());
-        let turns = vec![("first".into(), "one".into()), ("second\nand this\n- hi\n-- web".into(), "two".into()), ("cut short".into(), String::new()), ("! ls".into(), "Two files.".into()), ("And now?".into(), String::new())];
+        let turns = vec![("first".into(), "one".into()), ("second\nand this\n· nap ended\n- hi\n-- web".into(), "two".into()), ("cut short".into(), String::new()), ("! ls".into(), "Two files.".into()), ("And now?".into(), String::new())];
         assert_eq!(l, Last { turns, model: "claude-opus-5-5".into(), context: 100 });
     }
 }

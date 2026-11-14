@@ -55,6 +55,8 @@ pub enum Event {
     /// The background tasks that run now, a few words on each. Claude Code
     /// sends the whole list each time one starts or ends.
     Bg(Vec<String>),
+    /// A background task ended; one short line on it ("· nap ended").
+    TaskEnd(String),
     /// The process ended.
     Gone,
 }
@@ -71,6 +73,10 @@ pub fn read(v: &Value) -> Vec<Event> {
         "system" if v["subtype"] == "background_tasks_changed" => {
             let tasks = v["tasks"].as_array().into_iter().flatten();
             out.push(Event::Bg(tasks.map(|t| s(t, "description").chars().take(30).collect()).collect()));
+        }
+        "system" if v["subtype"] == "task_notification" => {
+            let block = format!("<task-notification><status>{}</status><summary>{}</summary>", s(v, "status"), s(v, "summary"));
+            out.extend(task_end(&block).map(Event::TaskEnd));
         }
         "system" if v["subtype"] == "init" => {
             out.push(Event::Init {
@@ -181,6 +187,19 @@ pub const MAIL: &str = "Messages delivered via the fleet bus";
 
 /// What other sessions sent, from the fleet bus hook's text without its
 /// header. The hook hands it over with a prompt, or at the end of a turn.
+/// Claude Code's report that a background task ended, as one short line:
+/// "· bar test ended". The dot marks it as no prompt of the user's.
+pub fn task_end(text: &str) -> Option<String> {
+    let rest = text.trim().strip_prefix("<task-notification>")?;
+    let part = |tag: &str| rest.split(&format!("<{tag}>")).nth(1).and_then(|r| r.split("</").next());
+    let name = part("summary").and_then(|s| s.split('"').nth(1)).unwrap_or("background task");
+    let how = match part("status") {
+        Some("completed") | None => "ended",
+        Some(other) => other,
+    };
+    Some(format!("· {name} {how}"))
+}
+
 pub fn mail(text: &str) -> Option<String> {
     let text = text.strip_prefix("Stop hook feedback:").unwrap_or(text).trim_start();
     let (head, body) = text.split_once('\n')?;
@@ -418,6 +437,16 @@ mod tests {
 
     fn ev(s: &str) -> Vec<Event> {
         read(&serde_json::from_str(s).unwrap())
+    }
+
+    #[test]
+    fn the_end_of_a_background_task_is_one_short_line() {
+        let t = "<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n<summary>Background command \"bar test\" completed (exit code 0)</summary>\n</task-notification>";
+        assert_eq!(task_end(t).as_deref(), Some("· bar test ended"));
+        assert_eq!(task_end(&t.replace("completed</status>", "failed</status>")).as_deref(), Some("· bar test failed"));
+        assert_eq!(task_end("scrot"), None);
+        let live = r#"{"type":"system","subtype":"task_notification","task_id":"b1","status":"completed","summary":"Background command \"nap\" completed (exit code 0)"}"#;
+        assert_eq!(ev(live), vec![Event::TaskEnd("· nap ended".into())]);
     }
 
     #[test]

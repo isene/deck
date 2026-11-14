@@ -88,6 +88,8 @@ const AMBER: u8 = 214;
 const WAIT: u8 = 141;
 /// An open ETA, in fleet's colour; RED once it has passed.
 const ETA: u8 = 220;
+/// Background tasks in the bar: orange, apart from the ETA's yellow.
+const BG: u8 = 209;
 /// C-D during a turn shows this first; a second C-D stops the turn and quits.
 
 struct Tool {
@@ -802,6 +804,15 @@ impl App {
                     answer = true;
                     log = true;
                     status = true;
+                }
+                // A background task ended: one grey line where a prompt would be.
+                Event::TaskEnd(line) => {
+                    if let Some(t) = self.turns.last_mut().filter(|t| t.answer.is_none()) {
+                        t.prompt = format!("{}\n{line}", t.prompt);
+                        answer = true;
+                    }
+                    self.log.push(Line::Prompt(line));
+                    log = true;
                 }
                 Event::Taken(_) => {}
                 // Another session's message joins the prompt of the turn it came in.
@@ -1791,7 +1802,7 @@ impl App {
             left += &style::fg(&format!(" · ETA {eta}"), c);
         }
         if !self.bg.is_empty() && self.ended.is_none() {
-            left += &style::fg(&format!(" · {}", bg_text(&self.bg)), AMBER);
+            left += &style::fg(&format!(" · {}", bg_text(&self.bg)), BG);
         }
         if let Some(f) = &self.flash {
             left += &style::dim(&format!(" · {f}"));
@@ -2245,7 +2256,7 @@ fn end_turn(turns: &mut Vec<Turn>, text: String, failed: bool, log_at: usize) ->
 }
 
 fn turn_text(t: &mut Turn, width: usize) -> String {
-    let prompt: Vec<String> = t.prompt.lines().map(|l| style::fg(&format!("› {l}"), BLUE)).collect();
+    let prompt: Vec<String> = t.prompt.lines().map(prompt_line).collect();
     let body = match &t.answer {
         None => style::dim("…"),
         Some(a) if a.trim().is_empty() && t.failed => style::fg("✗ stopped", RED),
@@ -2278,6 +2289,16 @@ fn shown(p: &str) -> String {
     }
 }
 
+/// One line of a prompt. The end of a background task ("· nap ended") is
+/// grey: Claude Code wrote it, not the user.
+fn prompt_line(l: &str) -> String {
+    if l.starts_with("· ") {
+        style::dim(l)
+    } else {
+        style::fg(&format!("› {l}"), BLUE)
+    }
+}
+
 /// A prompt in the log: its lines without the blank ones, up to ten.
 fn prompt_lines(p: &str) -> String {
     const MOST: usize = 10;
@@ -2286,7 +2307,7 @@ fn prompt_lines(p: &str) -> String {
         .iter()
         .take(MOST)
         .enumerate()
-        .map(|(i, l)| style::fg(&format!("{} {l}", if i == 0 { "›" } else { " " }), BLUE))
+        .map(|(i, l)| if l.starts_with("· ") { prompt_line(l) } else { style::fg(&format!("{} {l}", if i == 0 { "›" } else { " " }), BLUE) })
         .collect();
     if lines.len() > MOST {
         out.push(style::dim(&format!("  … {} more lines", lines.len() - MOST)));

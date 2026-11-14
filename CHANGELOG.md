@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.68 (2026-11-14)
+
+- The end of a background task shows as one grey line, as in
+  "· bar test ended". It was a raw block of tags under the prompt.
+- The background tasks in the top bar are orange, apart from the
+  yellow of the ETA.
+
 ## 0.1.67 (2026-11-14)
 
 - The background tasks show in deck's own top bar too. 0.1.66 wrote
