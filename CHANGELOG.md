@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.69 (2026-11-15)
+
+- `//` as a prompt draws a grey line under the answers: the task above
+  is done. Claude gets nothing, and the line is still there when deck
+  opens the session again, until the next prompt.
+
 ## 0.1.68 (2026-11-14)
 
 - The end of a background task shows as one grey line, as in

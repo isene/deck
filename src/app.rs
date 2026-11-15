@@ -30,6 +30,20 @@ Keys:
 /// The prompt fleet types into a session's window to hand it its messages.
 const WAKE_PROMPT: &str = "Check fleet messages";
 
+/// The prompt that draws a grey line: what is above it is done with.
+const DONE: &str = "//";
+
+/// Where a session's line is kept, so it is still there when deck opens
+/// again: ~/.deck/done/<session id>, newer than the transcript.
+fn done_file(id: &str) -> PathBuf {
+    let id: String = id.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect();
+    PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".deck/done").join(id)
+}
+
+fn done_turn(log_at: usize) -> Turn {
+    Turn { prompt: DONE.into(), answer: Some(String::new()), said: None, failed: false, log_at, drawn: None }
+}
+
 /// The keys, for `deck --help` and the C-? popup.
 const KEYS: &[(&str, &str)] = &[
     ("Enter", "send (while Claude works, it waits its turn, in purple)"),
@@ -41,6 +55,7 @@ const KEYS: &[(&str, &str)] = &[
     ("/model", "pick the model in a popup; /model sonnet switches at once"),
     ("/effort", "pick how hard Claude thinks in a popup; /effort high sets it at once"),
     ("/login", "sign in to Claude again, in the browser; the session goes on"),
+    ("//", "a grey line under the answers: this task is done"),
     ("C-A, C-E", "to the start or end of the prompt"),
     ("C-U, C-K", "delete to the start or end of the prompt"),
     ("C-Backspace", "delete a word"),
@@ -716,6 +731,11 @@ impl App {
             app.turns.push(Turn { prompt: prompt.clone(), answer: Some(answer), said: None, failed, log_at: app.log.len(), drawn: None });
             app.log.push(Line::Prompt(prompt));
         }
+        // The line drawn after the last answer is still the last thing here.
+        let mark = done_file(&app.s.id);
+        if mark.exists() && session::transcript(&app.s.id).is_none_or(|t| newer(&mark, &t)) {
+            app.turns.push(done_turn(app.log.len()));
+        }
         app
     }
 
@@ -1029,6 +1049,9 @@ impl App {
         }
         if text == "/login" {
             return self.login();
+        }
+        if text == DONE {
+            return self.done();
         }
         if let Some(level) = text.strip_prefix("/effort ").map(str::trim).filter(|l| EFFORTS.contains(l)) {
             self.effort = level.to_string();
@@ -1651,6 +1674,18 @@ impl App {
         self.layout();
     }
 
+    /// `//`: a grey line under the answers. Claude gets nothing.
+    fn done(&mut self) {
+        if self.turns.last().is_some_and(|t| t.prompt == DONE) {
+            return;
+        }
+        let mark = done_file(&self.s.id);
+        let _ = fs::create_dir_all(mark.parent().unwrap_or(Path::new(".")));
+        let _ = fs::write(&mark, "");
+        self.turns.push(done_turn(self.log.len()));
+        self.layout();
+    }
+
     /// `!` runs a command on the terminal itself, so a password prompt
     /// works. `script` keeps a copy of what it prints, which deck shows and
     /// Claude gets with the next prompt, as in Claude Code.
@@ -2256,6 +2291,9 @@ fn end_turn(turns: &mut Vec<Turn>, text: String, failed: bool, log_at: usize) ->
 }
 
 fn turn_text(t: &mut Turn, width: usize) -> String {
+    if t.prompt == DONE {
+        return style::dim(&"─".repeat(width));
+    }
     let prompt: Vec<String> = t.prompt.lines().map(prompt_line).collect();
     let body = match &t.answer {
         None => style::dim("…"),
@@ -3004,6 +3042,13 @@ mod tests {
         assert_eq!(script_to_run(text), Some("! /tmp/fix.sh"));
         assert_eq!(script_to_run("```bash\n! not this\n```\nand `x != y`"), None);
         assert_eq!(script_to_run("no code here"), None);
+    }
+
+    #[test]
+    fn two_slashes_are_a_grey_line_as_wide_as_the_pane() {
+        let text = crust::strip_ansi(&turn_text(&mut done_turn(0), 12));
+        assert_eq!(text, "─".repeat(12));
+        assert!(done_file("a/../b-1").ends_with(".deck/done/ab-1"));
     }
 
     #[test]
