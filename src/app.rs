@@ -1803,6 +1803,8 @@ impl App {
         if self.bridge.is_some() {
             return self.draw_bridge_bar();
         }
+        // At the prompt with an open ETA: the time is the state.
+        let waits = self.busy.is_none() && self.asks.is_empty() && self.eta.contains(':');
         let state = if self.ended.is_some() {
             style::fg("✗ Claude Code ended", RED)
         } else if !self.asks.is_empty() {
@@ -1822,6 +1824,10 @@ impl App {
                 st += &format!(" · {} waiting", self.waiting.len());
             }
             style::fg(&st, AMBER)
+        } else if waits {
+            // Work of its own runs to that time: the clock says so alone.
+            let c = if session::late(&self.eta, &clock()) { RED } else { ETA };
+            style::fg(&format!("● {}", self.eta), c)
         } else {
             style::fg("○ ready", GREEN)
         };
@@ -1833,7 +1839,7 @@ impl App {
             None => format!(" {}  {}  {}", style::bold("deck"), style::fg(&self.name(), PURPLE), state),
         };
         // Under gluon's bridge look too, after "▸ Claude", besides the sidebar.
-        if !self.eta.is_empty() && self.ended.is_none() {
+        if !self.eta.is_empty() && self.ended.is_none() && !(waits && self.side_parts.is_none()) {
             let eta = if self.eta == "?" { "unknown" } else { &self.eta };
             let c = if session::late(&self.eta, &clock()) { RED } else { ETA };
             left += &style::fg(&format!(" · ETA {eta}"), c);
@@ -1915,14 +1921,14 @@ impl App {
             if !self.waiting.is_empty() {
                 v.push(format!("{} WAITING", self.waiting.len()));
             }
-        } else {
+        } else if !self.eta.contains(':') {
             v.push("READY".into());
         }
         if !self.bg.is_empty() && self.ended.is_none() {
             v.push(bg_text(&self.bg).to_uppercase());
         }
         if !self.eta.is_empty() && self.ended.is_none() {
-            v.push(format!("ETA {}", self.eta));
+            v.push(if self.eta == "?" { "ETA ?".into() } else { self.eta.clone() });
         }
         v
     }

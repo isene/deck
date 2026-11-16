@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.71 (2026-11-16)
+
+- A session at its prompt with an open ETA says so with the time alone:
+  "● 16:30" where the top bar said "○ ready · ETA 16:30". It is not
+  ready while work of its own runs. The time is red once it has passed.
+  gluon's side list shows the time in place of READY.
+
 ## 0.1.70 (2026-11-16)
 
 - Every answer ends with the time it came, in grey at the right: `11:42`,
