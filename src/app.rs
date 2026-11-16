@@ -2313,6 +2313,10 @@ fn turn_text(t: &mut Turn, width: usize) -> String {
     format!("{}\n\n{}", prompt.join("\n"), body)
 }
 
+/// The grey of an answer's time: darker than dimmed text, which glass
+/// draws nearly white.
+const STAMP: u8 = 242;
+
 /// An answer with the time it came, in grey at the right end of its last
 /// line, or on a line of its own when that one is full.
 fn stamped(body: String, stamp: &str, width: usize) -> String {
@@ -2324,7 +2328,7 @@ fn stamped(body: String, stamp: &str, width: usize) -> String {
     // A line longer than the pane is wrapped by the pane, at a place not
     // known here: the time then gets a line of its own too.
     let (gap, used) = if last + 2 + stamp.len() <= width { ("", last) } else { ("\n", 0) };
-    format!("{body}{gap}{}{}", " ".repeat(width.saturating_sub(used + stamp.len())), style::dim(stamp))
+    format!("{body}{gap}{}{}", " ".repeat(width.saturating_sub(used + stamp.len())), style::fg(stamp, STAMP))
 }
 
 /// The time `at` as "11:42", with the day in front ("14 Nov 11:42") when
@@ -3097,8 +3101,8 @@ mod tests {
         assert_eq!(stamp(0, day), "");
         assert_eq!(stamp(1000 * day + 60, 1000 * day + 120).len(), 5);
         assert!(stamp(1000 * day, 1003 * day).len() > 8);
-        assert_eq!(stamped("one\nshort".into(), "11:42", 12), format!("one\nshort  {}", style::dim("11:42")));
-        assert_eq!(stamped("a full line.".into(), "11:42", 12), format!("a full line.\n       {}", style::dim("11:42")));
+        assert_eq!(stamped("one\nshort".into(), "11:42", 12), format!("one\nshort  {}", style::fg("11:42", STAMP)));
+        assert_eq!(stamped("a full line.".into(), "11:42", 12), format!("a full line.\n       {}", style::fg("11:42", STAMP)));
         assert_eq!(stamped("as it was".into(), "", 12), "as it was");
     }
 
