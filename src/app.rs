@@ -41,7 +41,7 @@ fn done_file(id: &str) -> PathBuf {
 }
 
 fn done_turn(log_at: usize) -> Turn {
-    Turn { prompt: DONE.into(), answer: Some(String::new()), said: None, failed: false, log_at, drawn: None }
+    Turn { prompt: DONE.into(), answer: Some(String::new()), said: None, failed: false, log_at, drawn: None, at: 0 }
 }
 
 /// The keys, for `deck --help` and the C-? popup.
@@ -137,6 +137,8 @@ struct Turn {
     log_at: usize,
     /// The answer as drawn, and the width it was drawn for.
     drawn: Option<(usize, String)>,
+    /// When the answer came, in seconds since 1970; 0 when not known.
+    at: i64,
 }
 
 pub struct App {
@@ -725,10 +727,10 @@ impl App {
             side_parts: None,
             spans: (0, 0),
         };
-        for (prompt, answer) in last.turns {
+        for ((prompt, answer), at) in last.turns.into_iter().zip(last.times) {
             // A prompt with no answer had its turn cut short; a ! command needs none.
             let failed = answer.is_empty() && !prompt.starts_with("! ");
-            app.turns.push(Turn { prompt: prompt.clone(), answer: Some(answer), said: None, failed, log_at: app.log.len(), drawn: None });
+            app.turns.push(Turn { prompt: prompt.clone(), answer: Some(answer), said: None, failed, log_at: app.log.len(), drawn: None, at });
             app.log.push(Line::Prompt(prompt));
         }
         // The line drawn after the last answer is still the last thing here.
@@ -1110,7 +1112,7 @@ impl App {
         if !text.is_empty() {
             self.log.push(Line::Prompt(text.clone()));
         }
-        self.turns.push(Turn { prompt: text, answer: None, said: None, failed: false, log_at: self.log.len(), drawn: None });
+        self.turns.push(Turn { prompt: text, answer: None, said: None, failed: false, log_at: self.log.len(), drawn: None, at: 0 });
         self.busy = Some(Instant::now());
         self.dim_at = None;
         if !self.hosted {
@@ -1669,7 +1671,7 @@ impl App {
             None => "The sign-in did not run.".to_string(),
         };
         let prompt = "/login".to_string();
-        self.turns.push(Turn { prompt: prompt.clone(), answer: Some(answer), said: None, failed, log_at: self.log.len(), drawn: None });
+        self.turns.push(Turn { prompt: prompt.clone(), answer: Some(answer), said: None, failed, log_at: self.log.len(), drawn: None, at: now() });
         self.log.push(Line::Prompt(prompt));
         self.layout();
     }
@@ -1711,7 +1713,7 @@ impl App {
             return self.layout();
         }
         let prompt = format!("! {cmd}");
-        self.turns.push(Turn { prompt: prompt.clone(), answer: Some(answer), said: None, failed, log_at: self.log.len(), drawn: None });
+        self.turns.push(Turn { prompt: prompt.clone(), answer: Some(answer), said: None, failed, log_at: self.log.len(), drawn: None, at: now() });
         self.log.push(Line::Prompt(prompt));
         // Claude reads what it printed at once, and answers.
         if self.ended.is_none() {
@@ -2277,7 +2279,7 @@ fn end_turn(turns: &mut Vec<Turn>, text: String, failed: bool, log_at: usize) ->
         if text.trim().is_empty() {
             return false;
         }
-        turns.push(Turn { prompt: String::new(), answer: None, said: None, failed: false, log_at, drawn: None });
+        turns.push(Turn { prompt: String::new(), answer: None, said: None, failed: false, log_at, drawn: None, at: 0 });
     }
     let Some(t) = turns.last_mut() else { return false };
     // The turn ended on that reply: it is the answer.
@@ -2287,6 +2289,7 @@ fn end_turn(turns: &mut Vec<Turn>, text: String, failed: bool, log_at: usize) ->
     t.answer = Some(text);
     t.failed = failed;
     t.drawn = None;
+    t.at = now();
     !failed
 }
 
@@ -2298,7 +2301,7 @@ fn turn_text(t: &mut Turn, width: usize) -> String {
     let body = match &t.answer {
         None => style::dim("…"),
         Some(a) if a.trim().is_empty() && t.failed => style::fg("✗ stopped", RED),
-        Some(_) => drawn(t, width),
+        Some(_) => stamped(drawn(t, width), &stamp(t.at, now()), width),
     };
     let body = match &t.said {
         Some(s) => format!("{s}\n\n{body}"),
@@ -2308,6 +2311,50 @@ fn turn_text(t: &mut Turn, width: usize) -> String {
         return body;
     }
     format!("{}\n\n{}", prompt.join("\n"), body)
+}
+
+/// An answer with the time it came, in grey at the right end of its last
+/// line, or on a line of its own when that one is full.
+fn stamped(body: String, stamp: &str, width: usize) -> String {
+    if stamp.is_empty() {
+        return body;
+    }
+    let body = body.trim_end();
+    let last = crust::display_width(&crust::strip_ansi(body.rsplit('\n').next().unwrap_or("")));
+    // A line longer than the pane is wrapped by the pane, at a place not
+    // known here: the time then gets a line of its own too.
+    let (gap, used) = if last + 2 + stamp.len() <= width { ("", last) } else { ("\n", 0) };
+    format!("{body}{gap}{}{}", " ".repeat(width.saturating_sub(used + stamp.len())), style::dim(stamp))
+}
+
+/// The time `at` as "11:42", with the day in front ("14 Nov 11:42") when
+/// that is another day than `now`'s. Empty when `at` is not known.
+fn stamp(at: i64, now: i64) -> String {
+    if at == 0 {
+        return String::new();
+    }
+    const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let (t, n) = (local(at), local(now));
+    let time = format!("{:02}:{:02}", t.tm_hour, t.tm_min);
+    if (t.tm_year, t.tm_yday) == (n.tm_year, n.tm_yday) {
+        return time;
+    }
+    format!("{} {} {time}", t.tm_mday, MONTHS[t.tm_mon.clamp(0, 11) as usize])
+}
+
+/// Seconds since 1970.
+fn now() -> i64 {
+    (now_ms() / 1000) as i64
+}
+
+/// A time as the local clock and calendar show it.
+fn local(at: i64) -> libc::tm {
+    // SAFETY: localtime_r fills the tm it is given and keeps nothing.
+    unsafe {
+        let mut tm: libc::tm = std::mem::zeroed();
+        libc::localtime_r(&(at as libc::time_t), &mut tm);
+        tm
+    }
 }
 
 /// Prompts sent while Claude works, in their own colour until they go.
@@ -3045,6 +3092,17 @@ mod tests {
     }
 
     #[test]
+    fn an_answer_ends_with_the_time_it_came() {
+        let day = 86_400;
+        assert_eq!(stamp(0, day), "");
+        assert_eq!(stamp(1000 * day + 60, 1000 * day + 120).len(), 5);
+        assert!(stamp(1000 * day, 1003 * day).len() > 8);
+        assert_eq!(stamped("one\nshort".into(), "11:42", 12), format!("one\nshort  {}", style::dim("11:42")));
+        assert_eq!(stamped("a full line.".into(), "11:42", 12), format!("a full line.\n       {}", style::dim("11:42")));
+        assert_eq!(stamped("as it was".into(), "", 12), "as it was");
+    }
+
+    #[test]
     fn two_slashes_are_a_grey_line_as_wide_as_the_pane() {
         let text = crust::strip_ansi(&turn_text(&mut done_turn(0), 12));
         assert_eq!(text, "─".repeat(12));
@@ -3162,7 +3220,7 @@ mod tests {
 
     #[test]
     fn an_answer_with_no_prompt_keeps_the_answer_before_it() {
-        let turn = |answer: Option<&str>| Turn { prompt: "list them".into(), answer: answer.map(String::from), said: None, failed: false, log_at: 0, drawn: None };
+        let turn = |answer: Option<&str>| Turn { prompt: "list them".into(), answer: answer.map(String::from), said: None, failed: false, log_at: 0, drawn: None, at: 0 };
         // The prompt's own answer fills its turn.
         let mut turns = vec![turn(None)];
         assert!(end_turn(&mut turns, "the list".into(), false, 3));
@@ -3180,7 +3238,7 @@ mod tests {
 
     #[test]
     fn a_reply_inside_the_turn_shows_under_its_prompt() {
-        let mut t = Turn { prompt: "build it\ncan I close chrome?".into(), answer: None, said: Some("Yes, you can.".into()), failed: false, log_at: 0, drawn: None };
+        let mut t = Turn { prompt: "build it\ncan I close chrome?".into(), answer: None, said: Some("Yes, you can.".into()), failed: false, log_at: 0, drawn: None, at: 0 };
         let text = crust::strip_ansi(&turn_text(&mut t, 80));
         assert_eq!(text, "› build it\n› can I close chrome?\n\nYes, you can.\n\n…");
     }

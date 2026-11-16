@@ -202,6 +202,9 @@ pub fn open_elsewhere(id: &str) -> Option<u32> {
 #[derive(Default, Debug, PartialEq)]
 pub struct Last {
     pub turns: Vec<(String, String)>,
+    /// When each turn's answer was written, in seconds since 1970; 0 when
+    /// the transcript does not say.
+    pub times: Vec<i64>,
     pub model: String,
     pub context: u64,
 }
@@ -299,6 +302,7 @@ pub fn last_in<'a>(lines: impl Iterator<Item = &'a str>) -> Last {
                     continue;
                 }
                 l.turns.push((t.to_string(), String::new()));
+                l.times.push(0);
             }
             Some("assistant") => {
                 for b in m["content"].as_array().into_iter().flatten() {
@@ -306,6 +310,9 @@ pub fn last_in<'a>(lines: impl Iterator<Item = &'a str>) -> Last {
                     let said = b["text"].as_str().filter(|t| !t.trim().is_empty() && t.trim() != "No response requested.");
                     if let (Some(t), Some(turn)) = (said, l.turns.last_mut()) {
                         turn.1 = t.trim().to_string();
+                        if let Some(at) = l.times.last_mut() {
+                            *at = v["timestamp"].as_str().map_or(0, seconds);
+                        }
                     }
                 }
                 if let Some(model) = m["model"].as_str().filter(|s| s.starts_with("claude")) {
@@ -325,7 +332,24 @@ pub fn last_in<'a>(lines: impl Iterator<Item = &'a str>) -> Last {
     }
     let cut = l.turns.len().saturating_sub(TURNS);
     l.turns.drain(..cut);
+    l.times.drain(..cut);
     l
+}
+
+/// "2026-11-16T10:19:51.926Z", the time on a line of a transcript, as
+/// seconds since 1970. 0 for anything else.
+fn seconds(iso: &str) -> i64 {
+    let n = |r: std::ops::Range<usize>| iso.get(r).and_then(|s| s.parse::<i64>().ok());
+    let (Some(y), Some(m), Some(d), Some(h), Some(min), Some(sec)) = (n(0..4), n(5..7), n(8..10), n(11..13), n(14..16), n(17..19)) else {
+        return 0;
+    };
+    // Days since 1970, counted from March so the leap day comes last.
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    let days = era * 146_097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719_468;
+    days * 86_400 + h * 3600 + min * 60 + sec
 }
 
 /// The clock time of the session's open ETA, as fleet's ETA column shows
@@ -559,6 +583,18 @@ mod tests {
         ];
         let l = last_in(lines.into_iter());
         let turns = vec![("first".into(), "one".into()), ("second\nand this\n· nap ended\n- hi\n-- web".into(), "two".into()), ("cut short".into(), String::new()), ("! ls".into(), "Two files.".into()), ("And now?".into(), String::new())];
-        assert_eq!(l, Last { turns, model: "claude-opus-5-5".into(), context: 100 });
+        assert_eq!(l, Last { turns, times: vec![0; 5], model: "claude-opus-5-5".into(), context: 100 });
+    }
+
+    #[test]
+    fn an_answer_keeps_the_time_the_transcript_gives_it() {
+        let lines = [
+            r#"{"type":"user","timestamp":"2026-11-16T10:00:00.000Z","message":{"content":"first"}}"#,
+            r#"{"type":"assistant","timestamp":"2026-11-16T10:19:51.926Z","message":{"content":[{"type":"text","text":"one"}]}}"#,
+            r#"{"type":"user","message":{"content":"second"}}"#,
+        ];
+        assert_eq!(last_in(lines.into_iter()).times, vec![1_794_824_391, 0]);
+        assert_eq!(seconds("1970-01-01T00:00:00Z"), 0);
+        assert_eq!(seconds("2024-02-29T12:00:00Z"), 1_709_208_000);
     }
 }

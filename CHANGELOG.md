@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.70 (2026-11-16)
+
+- Every answer ends with the time it came, in grey at the right: `11:42`,
+  or `14 Nov 11:42` for an answer from another day. Deck reads the time
+  from the session's transcript, so the answers of a reopened session
+  have it too, and Claude writes nothing extra.
+
 ## 0.1.69 (2026-11-15)
 
 - `//` as a prompt draws a grey line under the answers: the task above
