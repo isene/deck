@@ -70,6 +70,7 @@ const KEYS: &[(&str, &str)] = &[
     ("C-B", "pick the answer pane's colour (prism)"),
     ("C-S-B", "the next look: plain, the bridge, the matrix (green in glass); it stays for the next start"),
     ("C-V", "what this session still waits for you to do or decide"),
+    ("C-Space", "an empty answer pane to start afresh; PgUp still shows what was there"),
     ("C-L", "draw the screen again"),
     ("C-?", "this help"),
     ("C-D", "quit; a popup asks first while Claude or a command of its runs, and always under gluon"),
@@ -180,6 +181,9 @@ pub struct App {
     window: u64,
     limits: Option<(f64, f64, u64)>,
     turns: Vec<Turn>,
+    /// How many turns were there at the last C-SPACE. They stay in the
+    /// pane, above its first row; PgUp shows them.
+    clear_at: usize,
     /// Where the log stood when the last turn ended.
     turn_end: usize,
     log: Vec<Line>,
@@ -683,6 +687,7 @@ impl App {
             window,
             limits: None,
             turns: Vec::new(),
+            clear_at: 0,
             turn_end: 0,
             log: Vec::new(),
             waiting: VecDeque::new(),
@@ -1229,6 +1234,10 @@ impl App {
                     t.drawn = None;
                 }
                 self.layout();
+            }
+            "C-SPACE" => {
+                self.clear_at = self.turns.len();
+                self.fill_answer(true);
             }
             "C-G" => self.edit_input(),
             "C-Y" => self.copy_answer(),
@@ -2087,6 +2096,7 @@ impl App {
             for t in &mut self.turns {
                 blocks.push(turn_text(t, width));
             }
+            let cut = self.clear_at.min(blocks.len());
             match &self.ended {
                 Some(e) => blocks.push(style::fg("Claude Code ended.", RED) + "\n" + &style::dim(e)),
                 None if blocks.is_empty() => blocks.push(style::dim(&if self.s.resume {
@@ -2096,17 +2106,19 @@ impl App {
                 })),
                 None => {}
             }
-            let mut latest = blocks.pop().unwrap_or_default();
             // Sent ones in blue, held ones in purple.
             let tail: Vec<String> = [(&self.pushed, BLUE), (&self.waiting, WAIT)]
                 .into_iter()
                 .filter(|(q, _)| !q.is_empty())
                 .map(|(q, colour)| waiting_text(q.iter(), colour))
                 .collect();
+            let mut after = blocks.split_off(cut);
             if !tail.is_empty() {
-                latest += &format!("\n\n{}", tail.join("\n"));
+                after.push(tail.join("\n"));
             }
-            (blocks.join("\n\n"), latest)
+            let (before, after) = (blocks.join("\n\n"), after.join("\n\n"));
+            // After C-SPACE the pane starts where the old turns end.
+            if cut > 0 { (String::new(), afresh(&before, &after, self.answer.h as usize)) } else { (before, after) }
         };
         let all = if before.is_empty() { latest } else { format!("{before}\n\n{latest}") };
         self.answer.set_text(&all);
@@ -2280,6 +2292,15 @@ fn drawn(t: &mut Turn, width: usize) -> String {
 /// screen. Claude Code starts a turn of its own when an agent or a
 /// background task reports; that answer gets a turn with no prompt, so
 /// the answer before it stays. `log_at` is where such a turn's lines start.
+/// The answers after C-SPACE: what was there, then what came since on
+/// rows of its own, filled up to a whole pane. The pane shows its last
+/// `rows` rows, so it starts at the new part and PgUp reaches the old.
+fn afresh(before: &str, after: &str, rows: usize) -> String {
+    let mut new: Vec<&str> = if after.is_empty() { Vec::new() } else { after.split('\n').collect() };
+    new.resize(new.len().max(rows), "");
+    format!("{before}\n{}", new.join("\n"))
+}
+
 fn end_turn(turns: &mut Vec<Turn>, text: String, failed: bool, log_at: usize) -> bool {
     if turns.last().is_some_and(|t| t.answer.is_some()) {
         if text.trim().is_empty() {
@@ -3099,6 +3120,18 @@ mod tests {
         assert_eq!(script_to_run(text), Some("! /tmp/fix.sh"));
         assert_eq!(script_to_run("```bash\n! not this\n```\nand `x != y`"), None);
         assert_eq!(script_to_run("no code here"), None);
+    }
+
+    #[test]
+    fn after_a_clear_the_pane_starts_at_the_new_part() {
+        let last = |text: &str, rows: usize| -> Vec<String> {
+            let all: Vec<&str> = text.split('\n').collect();
+            all[all.len().saturating_sub(rows)..].iter().map(|l| l.to_string()).collect()
+        };
+        assert_eq!(last(&afresh("old\nold", "", 3), 3), ["", "", ""]);
+        assert_eq!(last(&afresh("old\nold", "new", 3), 3), ["new", "", ""]);
+        assert_eq!(last(&afresh("old", "a\nb\nc\nd", 3), 3), ["b", "c", "d"]);
+        assert!(afresh("old\nold", "new", 3).starts_with("old\nold\nnew"));
     }
 
     #[test]

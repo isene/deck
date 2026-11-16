@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.72 (2026-11-16)
+
+- Ctrl+Space empties the answer pane, to start afresh. Nothing is
+  lost: the old answers sit just above the first row, and PgUp shows
+  them. The next answer starts at the top of the pane.
+
 ## 0.1.71 (2026-11-16)
 
 - A session at its prompt with an open ETA says so with the time alone:

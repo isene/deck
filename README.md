@@ -84,6 +84,7 @@ deck <id>         open the session with this id
 | C-S-B | the next look: plain, the bridge, the matrix (green in glass); it stays for the next start |
 | C-? | the keys in a popup |
 | y, n | answer a permission question |
+| C-Space | an empty answer pane to start afresh; PgUp still shows what was there |
 | C-L | draw the screen again |
 | C-D | quit; a popup asks y/n first while Claude or a command of its runs, and always under gluon |
 
