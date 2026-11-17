@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.73 (2026-11-17)
+
+- The top bar shows a background task's words as far as the bar has
+  room, with "…" where they are cut. They stopped at thirty letters
+  before. The sidebar under gluon keeps the thirty.
+
 ## 0.1.72 (2026-11-16)
 
 - Ctrl+Space empties the answer pane, to start afresh. Nothing is

@@ -72,7 +72,7 @@ pub fn read(v: &Value) -> Vec<Event> {
     match v["type"].as_str().unwrap_or("") {
         "system" if v["subtype"] == "background_tasks_changed" => {
             let tasks = v["tasks"].as_array().into_iter().flatten();
-            out.push(Event::Bg(tasks.map(|t| s(t, "description").chars().take(30).collect()).collect()));
+            out.push(Event::Bg(tasks.map(|t| s(t, "description").split_whitespace().collect::<Vec<_>>().join(" ").chars().take(200).collect()).collect()));
         }
         "system" if v["subtype"] == "task_notification" => {
             let block = format!("<task-notification><status>{}</status><summary>{}</summary>", s(v, "status"), s(v, "summary"));

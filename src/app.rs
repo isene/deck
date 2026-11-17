@@ -1854,7 +1854,9 @@ impl App {
             left += &style::fg(&format!(" · ETA {eta}"), c);
         }
         if !self.bg.is_empty() && self.ended.is_none() {
-            left += &style::fg(&format!(" · {}", bg_text(&self.bg)), BG);
+            // The task's words run as far as the bar has room, then "…".
+            let room = (self.bar.w as usize).saturating_sub(crust::display_width(&left) + 4);
+            left += &style::fg(&format!(" · {}", cut(&bg_text(&self.bg), room)), BG);
         }
         if let Some(f) = &self.flash {
             left += &style::dim(&format!(" · {f}"));
@@ -1934,7 +1936,9 @@ impl App {
             v.push("READY".into());
         }
         if !self.bg.is_empty() && self.ended.is_none() {
-            v.push(bg_text(&self.bg).to_uppercase());
+            // The sidebar is narrow: thirty letters a task, as before.
+            let short: Vec<String> = self.bg.iter().map(|t| t.chars().take(30).collect()).collect();
+            v.push(bg_text(&short).to_uppercase());
         }
         if !self.eta.is_empty() && self.ended.is_none() {
             v.push(if self.eta == "?" { "ETA ?".into() } else { self.eta.clone() });
@@ -2784,6 +2788,16 @@ fn open_rows(rows: &str, name: &str, width: usize) -> Vec<String> {
 }
 
 /// The model id in a "/model <id>" line; None for an alias or other text.
+/// A text cut to `room` letters, the last one "…" when some were left out.
+fn cut(text: &str, room: usize) -> String {
+    if text.chars().count() <= room {
+        return text.to_string();
+    }
+    let mut s: String = text.chars().take(room.saturating_sub(1)).collect();
+    s.push('…');
+    s
+}
+
 /// The background tasks for the top bar: "1 bg: spare server".
 fn bg_text(bg: &[String]) -> String {
     format!("{} bg: {}", bg.len(), bg.join(", "))
@@ -2979,6 +2993,8 @@ mod tests {
     fn the_bar_counts_and_names_background_tasks() {
         assert_eq!(bg_text(&["spare server".to_string()]), "1 bg: spare server");
         assert_eq!(bg_text(&["a".to_string(), "b".to_string()]), "2 bg: a, b");
+        assert_eq!(cut("1 bg: Wait for the release build", 40), "1 bg: Wait for the release build");
+        assert_eq!(cut("1 bg: Wait for the release build", 12), "1 bg: Wait …");
     }
 
     #[test]
