@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.74 (2026-11-18)
+
+- A `!` command sent with C-Enter that Claude got only after its turn
+  ended stayed blue at the bottom for good. deck waited for Claude Code
+  to echo it, and Claude Code echoes no turn that starts from a command.
+  deck stayed "working", and every prompt after it piled up below the
+  answers. Now that command starts the next turn at once, in its place.
+
 ## 0.1.73 (2026-11-17)
 
 - The top bar shows a background task's words as far as the bar has

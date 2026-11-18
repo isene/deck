@@ -896,7 +896,9 @@ impl App {
                     // fleet's stop hook has kept or cleared the ETA by now.
                     self.eta = session::eta(&self.s.id);
                     // Prompts sent with C-Enter run next; the purple ones wait for them.
-                    if self.pushed.is_empty() {
+                    if let Some(text) = unechoed(&mut self.pushed) {
+                        self.start(text);
+                    } else if self.pushed.is_empty() {
                         self.busy = None;
                         self.quiet = Some(Instant::now());
                         if let Some(next) = self.waiting.pop_front() {
@@ -2803,6 +2805,16 @@ fn bg_text(bg: &[String]) -> String {
     format!("{} bg: {}", bg.len(), bg.join(", "))
 }
 
+/// The sent prompts Claude runs as its next turn without an echo: Claude
+/// Code echoes no new turn that holds a ! command's output, nor the prompts
+/// joined to it. None when an echo will come.
+fn unechoed(pushed: &mut VecDeque<String>) -> Option<String> {
+    if !pushed.iter().any(|p| p.starts_with("<bash-input>")) {
+        return None;
+    }
+    Some(pushed.drain(..).map(|p| shown(&p)).collect::<Vec<_>>().join("\n"))
+}
+
 /// How many of the first sent prompts the echoed message holds: Claude Code
 /// joins the ones that waited into one message, a line break between them.
 fn taken(pushed: &VecDeque<String>, text: &str) -> usize {
@@ -3110,6 +3122,16 @@ mod tests {
         let said = "<bash-input>ls -l</bash-input>\n<bash-stdout>a\nb</bash-stdout>\n".to_string();
         let text = crust::strip_ansi(&waiting_text([said, "!pwd".to_string()].iter(), BLUE));
         assert_eq!(text, "› ! ls -l\n› !pwd");
+    }
+
+    #[test]
+    fn a_command_still_unread_when_a_turn_ends_starts_the_next_one() {
+        let mut q: VecDeque<String> = ["more".to_string()].into();
+        assert_eq!(unechoed(&mut q), None);
+        assert_eq!(q.len(), 1);
+        q.push_front("<bash-input>gh auth</bash-input>\n<bash-stdout>ok</bash-stdout>\n".into());
+        assert_eq!(unechoed(&mut q).as_deref(), Some("! gh auth\nmore"));
+        assert!(q.is_empty());
     }
 
     #[test]
