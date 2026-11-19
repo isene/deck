@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.77 (2026-11-19)
+
+- YOURS is now bold green and working is amber, in deck, fleet and the
+  phone's fleet alike. Green means your turn, amber means wait, red
+  means stuck.
+
+## 0.1.76 (2026-11-19)
+
+- The top bar uses fleet's words and colours for each state: working,
+  YOURS, idle and off.
+
+## 0.1.75 (2026-11-19)
+
+- A background job that ended between turns made Claude start a turn
+  that deck did not show, and deck could freeze Claude in the middle of
+  it. deck now shows that turn and keeps Claude awake until it is over.
+
 ## 0.1.74 (2026-11-18)
 
 - A `!` command sent with C-Enter that Claude got only after its turn

@@ -103,8 +103,8 @@ const RED: u8 = 203;
 const AMBER: u8 = 214;
 const WAIT: u8 = 141;
 /// fleet's state colours, so a session reads the same here as in its row.
-const WORKING: u8 = 46;
-const YOURS: u8 = 208;
+const WORKING: u8 = AMBER;
+const YOURS: u8 = 46;
 const IDLE: u8 = 69;
 const OFF: u8 = 60;
 /// An open ETA: fleet shows it in the working colour; RED once it has passed.
