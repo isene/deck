@@ -449,6 +449,11 @@ pub fn dim_after(tag: Option<&str>) -> Option<Duration> {
     dims_in(&rc, tag).then(|| Duration::from_secs(idle_in(&rc) * 60))
 }
 
+/// How long a quiet session waits before fleet calls it idle.
+pub fn idle_after() -> Duration {
+    Duration::from_secs(idle_in(&fs::read_to_string(home().join(".fleetrc")).unwrap_or_default()) * 60)
+}
+
 /// fleet's `idle_mins N`: a session quiet this many minutes is idle.
 fn idle_in(rc: &str) -> u64 {
     rc.lines()

@@ -102,9 +102,14 @@ const GREEN: u8 = 78;
 const RED: u8 = 203;
 const AMBER: u8 = 214;
 const WAIT: u8 = 141;
-/// An open ETA, in fleet's colour; RED once it has passed.
-const ETA: u8 = 220;
-/// Background tasks in the bar: orange, apart from the ETA's yellow.
+/// fleet's state colours, so a session reads the same here as in its row.
+const WORKING: u8 = 46;
+const YOURS: u8 = 208;
+const IDLE: u8 = 69;
+const OFF: u8 = 60;
+/// An open ETA: fleet shows it in the working colour; RED once it has passed.
+const ETA: u8 = WORKING;
+/// Background tasks in the bar.
 const BG: u8 = 209;
 /// C-D during a turn shows this first; a second C-D stops the turn and quits.
 
@@ -201,6 +206,10 @@ pub struct App {
     /// When the glass dims: once fleet would call the session idle. None
     /// while Claude works, once dimmed, or with the dim off.
     dim_at: Option<Instant>,
+    /// When fleet calls the quiet session idle; None once it is, or in a turn.
+    idle_at: Option<Instant>,
+    /// fleet's `idle_mins`, read once at the start.
+    idle: Duration,
     /// When the step Claude is on began: a tool call, its end, or a note.
     step: Instant,
     /// deck was built again since it started; the foot says so.
@@ -514,11 +523,9 @@ impl App {
             (None, Some(t)) => self.park.saturating_sub(t.elapsed()).as_secs().max(1),
             (None, None) => 86400,
         };
-        // Once more, when the glass dims.
-        match self.dim_at {
-            Some(t) => wait.min(t.saturating_duration_since(Instant::now()).as_secs().max(1)),
-            None => wait,
-        }
+        // Once more when the glass dims, and once when the bar turns idle.
+        [self.dim_at, self.idle_at].into_iter().flatten()
+            .fold(wait, |w, t| w.min(t.saturating_duration_since(Instant::now()).as_secs().max(1)))
     }
 
     pub fn after_wait(&mut self, key: Option<String>) {
@@ -558,6 +565,9 @@ impl App {
         if self.busy.is_none() && self.dim_at.is_some_and(|t| Instant::now() >= t) {
             self.dim_at = None;
             print!("{}", style::dim_seq(true));
+        }
+        if self.busy.is_none() && self.idle_at.is_some_and(|t| Instant::now() >= t) {
+            self.idle_at = None;
         }
         // A rebuild shows at the next wake, not after the turn. Once old,
         // deck stays old, so the check stops; under gluon it never runs.
@@ -665,6 +675,7 @@ impl App {
         let window = known_window(&last.model);
         let history = load_history(&s.cwd);
         let eta = session::eta(&s.id);
+        let idle = session::idle_after();
         let mut app = App {
             s,
             claude,
@@ -698,6 +709,8 @@ impl App {
             quiet: Some(Instant::now()),
             park: Duration::from_secs(std::env::var("DECK_PARK").ok().and_then(|v| v.parse().ok()).unwrap_or(600)),
             dim_at: None,
+            idle_at: Some(Instant::now() + idle),
+            idle,
             step: Instant::now(),
             old: false,
             eta,
@@ -910,6 +923,7 @@ impl App {
                     // when it turns YOURS: a session that waits for you stays
                     // bright. Under gluon one glass shows every tab, so it stays
                     // as it is. fleet's D and Ctrl-D keys switch it off in ~/.fleetrc.
+                    self.idle_at = self.busy.is_none().then(|| Instant::now() + self.idle);
                     self.dim_at = if self.busy.is_none() && !self.hosted {
                         session::dim_after(self.s.tags.first().map(String::as_str)).map(|d| Instant::now() + d)
                     } else {
@@ -1123,6 +1137,7 @@ impl App {
         self.turns.push(Turn { prompt: text, answer: None, said: None, failed: false, log_at: self.log.len(), drawn: None, at: 0 });
         self.busy = Some(Instant::now());
         self.dim_at = None;
+        self.idle_at = None;
         if !self.hosted {
             print!("{}", style::dim_seq(false));
         }
@@ -1818,9 +1833,9 @@ impl App {
         // At the prompt with an open ETA: the time is the state.
         let waits = self.busy.is_none() && self.asks.is_empty() && self.eta.contains(':');
         let state = if self.ended.is_some() {
-            style::fg("✗ Claude Code ended", RED)
+            style::fg("✗ off · Claude Code ended", OFF)
         } else if !self.asks.is_empty() {
-            style::fg("▲ waiting for your answer", AMBER)
+            style::styled("▲ YOURS · waiting for your answer", Some(YOURS), None, "b")
         } else if let Some(t0) = self.busy {
             let s = t0.elapsed().as_secs();
             let (tools, running) = self.turn_tools();
@@ -1835,13 +1850,15 @@ impl App {
             if !self.waiting.is_empty() {
                 st += &format!(" · {} waiting", self.waiting.len());
             }
-            style::fg(&st, AMBER)
+            style::fg(&st, WORKING)
         } else if waits {
             // Work of its own runs to that time: the clock says so alone.
             let c = if session::late(&self.eta, &clock()) { RED } else { ETA };
             style::fg(&format!("● {}", self.eta), c)
+        } else if self.idle_at.is_none() {
+            style::fg("○ idle", IDLE)
         } else {
-            style::fg("○ ready", GREEN)
+            style::styled("○ YOURS", Some(YOURS), None, "b")
         };
         let mut left = match &self.tab_line {
             // gluon's sidebar shows the state.
@@ -1918,9 +1935,9 @@ impl App {
         let time = |s: u64| format!("{}:{:02}", s / 60, s % 60);
         let mut v: Vec<String> = Vec::new();
         if self.ended.is_some() {
-            v.push("ENDED".into());
+            v.push("OFF".into());
         } else if !self.asks.is_empty() {
-            v.extend(["WAITING FOR".into(), "YOUR ANSWER".into()]);
+            v.extend(["YOURS".into(), "WAITING FOR".into(), "YOUR ANSWER".into()]);
         } else if let Some(t0) = self.busy {
             let (tools, running) = self.turn_tools();
             let at = time(self.step.elapsed().as_secs());
@@ -1936,7 +1953,7 @@ impl App {
                 v.push(format!("{} WAITING", self.waiting.len()));
             }
         } else if !self.eta.contains(':') {
-            v.push("READY".into());
+            v.push(if self.idle_at.is_none() { "IDLE" } else { "YOURS" }.into());
         }
         if !self.bg.is_empty() && self.ended.is_none() {
             // The sidebar is narrow: thirty letters a task, as before.

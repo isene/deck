@@ -22,8 +22,10 @@ user@host ~/src/myproject [Opus 5.5 high] [12%] ...
   ✗ when it failed. C-O shows the last turn's calls with their output.
 - When a stop hook sends an answer back, you see only the rewrite, and one
   log line says what the hook found.
+- The top bar names the session's state in fleet's words and colours:
+  working (green), YOURS (bold orange), idle (blue) and off (grey-blue).
 - When an answer gave an ETA for work that goes on after it, the top bar
-  shows that time in place of "ready", as fleet's State column does ("● 16:30"), and in
+  shows that time in place of "YOURS", as fleet's State column does ("● 16:30"), and in
   red once that time has passed. Under gluon it follows "▸ Claude".
 - When the session goes idle as fleet counts it (`idle_mins` in
   `~/.fleetrc`, 30 by default, after the turn ends), glass dims deck's
