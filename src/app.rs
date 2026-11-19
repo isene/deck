@@ -834,11 +834,12 @@ impl App {
                 }
                 // A background task ended: one grey line where a prompt would be.
                 Event::TaskEnd(line) => {
-                    if let Some(t) = self.turns.last_mut().filter(|t| t.answer.is_none()) {
-                        t.prompt = format!("{}\n{line}", t.prompt);
+                    if task_ended(&mut self.turns, &line) {
+                        self.start(line);
+                    } else {
+                        self.log.push(Line::Prompt(line));
                         answer = true;
                     }
-                    self.log.push(Line::Prompt(line));
                     log = true;
                 }
                 Event::Taken(_) => {}
@@ -2805,6 +2806,19 @@ fn bg_text(bg: &[String]) -> String {
     format!("{} bg: {}", bg.len(), bg.join(", "))
 }
 
+/// A background task ended. Inside a turn it joins that turn's prompt.
+/// Between turns Claude Code answers it with a turn of its own, so true:
+/// deck must start one, or it pauses Claude in the middle of it.
+fn task_ended(turns: &mut [Turn], line: &str) -> bool {
+    match turns.last_mut().filter(|t| t.answer.is_none()) {
+        Some(t) => {
+            t.prompt = format!("{}\n{line}", t.prompt);
+            false
+        }
+        None => true,
+    }
+}
+
 /// The sent prompts Claude runs as its next turn without an echo: Claude
 /// Code echoes no new turn that holds a ! command's output, nor the prompts
 /// joined to it. None when an echo will come.
@@ -3122,6 +3136,16 @@ mod tests {
         let said = "<bash-input>ls -l</bash-input>\n<bash-stdout>a\nb</bash-stdout>\n".to_string();
         let text = crust::strip_ansi(&waiting_text([said, "!pwd".to_string()].iter(), BLUE));
         assert_eq!(text, "› ! ls -l\n› !pwd");
+    }
+
+    #[test]
+    fn a_task_that_ends_between_turns_starts_one_and_inside_a_turn_joins_it() {
+        let turn = |answer: Option<&str>| Turn { prompt: "p".into(), answer: answer.map(Into::into), said: None, failed: false, log_at: 0, drawn: None, at: 0 };
+        assert!(task_ended(&mut [], "· nap ended"));
+        assert!(task_ended(&mut [turn(Some("done"))], "· nap ended"));
+        let mut open = [turn(None)];
+        assert!(!task_ended(&mut open, "· nap ended"));
+        assert_eq!(open[0].prompt, "p\n· nap ended");
     }
 
     #[test]

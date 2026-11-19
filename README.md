@@ -117,6 +117,9 @@ still shows as open in fleet. While Claude runs a job of its own (a
 background command, a monitor), it is not paused, so the job's end can
 wake it. `DECK_PARK=<seconds>` sets the wait.
 
+When such a job ends, Claude starts a turn to answer it, and deck keeps
+Claude awake until that turn is over.
+
 ## Build
 
 ```
