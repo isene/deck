@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.79 (2026-11-23)
+
+- The scroll marks over the answer are grey, not white.
+
 ## 0.1.78 (2026-11-23)
 
 - The status line starts one space in from the left edge.

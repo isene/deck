@@ -1774,6 +1774,8 @@ impl App {
         one(&mut self.bar);
         // One blank column keeps the answer's scroll mark off the log.
         self.answer = Pane::new(x, top + 2, cols - sw - u16::from(sw > 0), h, 231, 0);
+        // The scroll marks in grey, quieter than the white text.
+        self.answer.scroll_fg = Some(244);
         if let Some(hex) = &self.colour {
             self.answer.set_bg_hex(hex);
         }
