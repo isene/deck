@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.78 (2026-11-23)
+
+- The status line starts one space in from the left edge.
+
 ## 0.1.77 (2026-11-19)
 
 - YOURS is now bold green and working is amber, in deck, fleet and the

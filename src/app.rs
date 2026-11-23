@@ -2001,8 +2001,9 @@ impl App {
         let status = if self.side_parts.is_some() { "" } else { &self.status };
         let fix = if self.hosted { "rebuild gluon" } else { "restart" };
         let version = if old { format!("deck v{VERSION} is old: {fix} ") } else { format!("deck v{VERSION} ") };
-        let room = (self.foot.w as usize).saturating_sub(version.len() + 1);
-        let status = crust::truncate_ansi(status, room);
+        // A space at the left edge gives the first letter room to breathe.
+        let room = (self.foot.w as usize).saturating_sub(version.len() + 2);
+        let status = if status.is_empty() { String::new() } else { format!(" {}", crust::truncate_ansi(status, room)) };
         let pad = " ".repeat((self.foot.w as usize).saturating_sub(version.len() + crust::display_width(&status)));
         // Amber when old, as in kastrup and tock.
         let version = if old { style::bold(&style::fg(&version, 208)) } else { style::dim(&version) };
