@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.80 (2026-11-23)
+
+- The answers leave out the lines for ended background tasks; the tool log beside them keeps them.
+
 ## 0.1.79 (2026-11-23)
 
 - The scroll marks over the answer are grey, not white.

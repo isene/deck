@@ -2351,7 +2351,9 @@ fn turn_text(t: &mut Turn, width: usize) -> String {
     if t.prompt == DONE {
         return style::dim(&"─".repeat(width));
     }
-    let prompt: Vec<String> = t.prompt.lines().map(prompt_line).collect();
+    // The end of a background task ("· nap ended") shows in the tool log
+    // beside it, so the answers leave it out.
+    let prompt: Vec<String> = t.prompt.lines().filter(|l| !l.starts_with("· ")).map(prompt_line).collect();
     let body = match &t.answer {
         None => style::dim("…"),
         Some(a) if a.trim().is_empty() && t.failed => style::fg("✗ stopped", RED),
@@ -3366,6 +3368,15 @@ mod tests {
         let mut t = Turn { prompt: "build it\ncan I close chrome?".into(), answer: None, said: Some("Yes, you can.".into()), failed: false, log_at: 0, drawn: None, at: 0 };
         let text = crust::strip_ansi(&turn_text(&mut t, 80));
         assert_eq!(text, "› build it\n› can I close chrome?\n\nYes, you can.\n\n…");
+    }
+
+    #[test]
+    fn the_answers_leave_out_the_ends_of_background_tasks() {
+        let mut t = Turn { prompt: "build it\n· nap ended".into(), answer: None, said: None, failed: false, log_at: 0, drawn: None, at: 0 };
+        assert_eq!(crust::strip_ansi(&turn_text(&mut t, 80)), "› build it\n\n…");
+        let mut t = Turn { prompt: "· nap ended".into(), answer: None, said: None, failed: false, log_at: 0, drawn: None, at: 0 };
+        assert_eq!(crust::strip_ansi(&turn_text(&mut t, 80)), "…");
+        assert_eq!(crust::strip_ansi(&prompt_lines("build it\n· nap ended")), "› build it\n· nap ended");
     }
 
     #[test]
