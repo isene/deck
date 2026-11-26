@@ -264,6 +264,9 @@ pub struct Claude {
     asked: u64,
     /// Held with SIGSTOP while idle; the next thing sent lets it go on.
     paused: bool,
+    /// What it runs before the first prompt: MCP servers, which live as
+    /// long as it does and are no work. None until the first prompt.
+    helpers: Option<Vec<i32>>,
 }
 
 impl Claude {
@@ -335,7 +338,7 @@ impl Claude {
             let _ = tx.send(Event::Gone);
             wake();
         });
-        Ok(Claude { child, stdin, asked: 0, paused: false })
+        Ok(Claude { child, stdin, asked: 0, paused: false, helpers: None })
     }
 
     /// Hold it while idle: an idle Claude Code still wakes about 25 times
@@ -358,9 +361,11 @@ impl Claude {
         }
     }
 
-    /// True while it runs a command, in a turn or in the background.
+    /// True while it runs a command, in a turn or in the background. Its
+    /// MCP servers do not count.
     pub fn has_children(&self) -> bool {
-        !self.children().is_empty()
+        let helpers = self.helpers.as_deref().unwrap_or_default();
+        self.children().iter().any(|p| !helpers.contains(p))
     }
 
     /// The process ids of the commands it runs.
@@ -373,6 +378,9 @@ impl Claude {
 
     fn send(&mut self, v: Value) {
         self.go_on();
+        if self.helpers.is_none() {
+            self.helpers = Some(self.children());
+        }
         if let Some(i) = self.stdin.as_mut() {
             let _ = writeln!(i, "{v}").and_then(|_| i.flush());
         }
@@ -406,10 +414,9 @@ impl Claude {
     pub fn stop(&mut self, busy: bool) {
         self.go_on();
         self.stdin = None;
-        let jobs = self.children();
-        if busy || !jobs.is_empty() {
+        if busy || self.has_children() {
             // Claude Code starts each command in a group of its own.
-            for p in jobs {
+            for p in self.children() {
                 unsafe {
                     if libc::kill(-p, libc::SIGTERM) != 0 {
                         libc::kill(p, libc::SIGTERM);
@@ -555,6 +562,18 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(100));
         assert_eq!(state(&orphan), 'Z');
         orphan.stop(true);
+        // What runs before the first prompt, as an MCP server does, is no
+        // work; a command started after it is.
+        let mut helped = start("sleep 30 & exec sleep 30");
+        helped.say("hi");
+        assert!(helped.pause());
+        assert_eq!(state(&helped), 'T');
+        helped.stop(true);
+        let mut later = start("read x; sleep 30 & exec sleep 30");
+        later.say("hi");
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert!(!later.pause());
+        later.stop(true);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.81 (2026-11-26)
+
+- An MCP server no longer counts as work. Before, a session with one
+  never paused when idle, and C-D always asked "still at work?".
+
 ## 0.1.80 (2026-11-23)
 
 - The answers leave out the lines for ended background tasks; the tool log beside them keeps them.
